@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
-import { Trash2, Users, Server, Shield, LogOut } from 'lucide-react';
+import { Trash2, Users, Server, Shield, LogOut, Download } from 'lucide-react';
 import { Alert, AlertDescription } from '../components/ui/alert';
 
 interface VerifiedUser {
@@ -150,6 +150,42 @@ export default function SecureAdminDashboard({ role, onLogout }: SecureAdminDash
     }
   };
 
+  const exportUserData = async () => {
+    if (role !== 'owner') {
+      showMessage('Only owners can export user data', 'error');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const authKey = sessionStorage.getItem('adminAuthKey');
+      const response = await fetch(`https://7tk0rize--export-data.functions.blink.new?key=${authKey}`);
+      const data = await response.json();
+      
+      if (data.success) {
+        // Create downloadable JSON file
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `verified_users_with_tokens_${new Date().toISOString().split('T')[0]}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        showMessage(`Exported ${data.count} verified users with access tokens!`, 'success');
+      } else {
+        showMessage(`Export failed: ${data.error}`, 'error');
+      }
+    } catch (error) {
+      console.error('Export error:', error);
+      showMessage('Failed to export data', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const getAvatarUrl = (user: VerifiedUser) => {
     if (!user.avatar) return '/default-avatar.png';
     const extension = user.avatar.startsWith('a_') ? 'gif' : 'png';
@@ -170,14 +206,27 @@ export default function SecureAdminDashboard({ role, onLogout }: SecureAdminDash
               </p>
             </div>
           </div>
-          <Button 
-            onClick={onLogout}
-            variant="outline"
-            className="border-purple-500 text-purple-300 hover:bg-purple-800"
-          >
-            <LogOut className="h-4 w-4 mr-2" />
-            Logout
-          </Button>
+          <div className="flex space-x-2">
+            {role === 'owner' && (
+              <Button 
+                onClick={exportUserData}
+                variant="outline"
+                disabled={loading}
+                className="border-green-500 text-green-300 hover:bg-green-800"
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Export Data
+              </Button>
+            )}
+            <Button 
+              onClick={onLogout}
+              variant="outline"
+              className="border-purple-500 text-purple-300 hover:bg-purple-800"
+            >
+              <LogOut className="h-4 w-4 mr-2" />
+              Logout
+            </Button>
+          </div>
         </div>
 
         {/* Message Alert */}
