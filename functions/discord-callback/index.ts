@@ -21,13 +21,19 @@ serve(async (req) => {
   try {
     const url = new URL(req.url);
     const code = url.searchParams.get('code');
-    const state = url.searchParams.get('state');
 
     if (!code) {
-      return new Response('Missing authorization code', { status: 400 });
+      console.error('Missing authorization code');
+      return new Response(null, {
+        status: 302,
+        headers: {
+          'Location': `${url.origin}/verification-failed?error=missing_code`,
+          'Access-Control-Allow-Origin': '*',
+        },
+      });
     }
 
-    console.log('Received Discord callback with code:', code);
+    console.log('Processing Discord OAuth callback...');
 
     // Exchange code for access token
     const tokenResponse = await fetch('https://discord.com/api/oauth2/token', {
@@ -47,7 +53,13 @@ serve(async (req) => {
     if (!tokenResponse.ok) {
       const errorText = await tokenResponse.text();
       console.error('Token exchange failed:', errorText);
-      return new Response(`Token exchange failed: ${errorText}`, { status: 400 });
+      return new Response(null, {
+        status: 302,
+        headers: {
+          'Location': `${url.origin}/verification-failed?error=token_exchange`,
+          'Access-Control-Allow-Origin': '*',
+        },
+      });
     }
 
     const tokenData = await tokenResponse.json();
@@ -63,7 +75,13 @@ serve(async (req) => {
     if (!userResponse.ok) {
       const errorText = await userResponse.text();
       console.error('User fetch failed:', errorText);
-      return new Response(`User fetch failed: ${errorText}`, { status: 400 });
+      return new Response(null, {
+        status: 302,
+        headers: {
+          'Location': `${url.origin}/verification-failed?error=user_fetch`,
+          'Access-Control-Allow-Origin': '*',
+        },
+      });
     }
 
     const userData = await userResponse.json();
@@ -72,13 +90,14 @@ serve(async (req) => {
     // Store verified user in database
     const verifiedUser = {
       id: `verified_${userData.id}_${Date.now()}`,
-      user_id: userData.id,
+      userId: userData.id,
       username: userData.username,
-      avatar_url: userData.avatar ? `https://cdn.discordapp.com/avatars/${userData.id}/${userData.avatar}.png` : null,
-      access_token: tokenData.access_token,
-      refresh_token: tokenData.refresh_token || null,
-      verified_at: new Date().toISOString(),
-      created_at: new Date().toISOString()
+      discriminator: userData.discriminator || '0',
+      avatarUrl: userData.avatar ? `https://cdn.discordapp.com/avatars/${userData.id}/${userData.avatar}.png` : null,
+      accessToken: tokenData.access_token,
+      refreshToken: tokenData.refresh_token || null,
+      verifiedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString()
     };
 
     await blink.db.verifiedUsers.create(verifiedUser);
@@ -97,9 +116,10 @@ serve(async (req) => {
 
   } catch (error) {
     console.error('Discord callback error:', error);
-    return new Response(`Internal server error: ${error.message}`, { 
-      status: 500,
+    return new Response(null, {
+      status: 302,
       headers: {
+        'Location': `${url.origin}/verification-failed?error=server_error`,
         'Access-Control-Allow-Origin': '*',
       },
     });

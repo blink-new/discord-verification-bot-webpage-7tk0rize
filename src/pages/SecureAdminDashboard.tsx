@@ -61,13 +61,53 @@ export default function SecureAdminDashboard() {
   const loadData = async () => {
     setIsLoading(true)
     try {
-      // Load admin dashboard data
-      const dashboardResponse = await fetch('https://7tk0rize--admin-api.functions.blink.new/admin/dashboard')
-      const dashboardData = await dashboardResponse.json()
+      // Get admin session token
+      const savedSession = localStorage.getItem('admin_session')
+      if (!savedSession) return
       
-      if (dashboardData.stats && dashboardData.users) {
-        setStats(dashboardData.stats)
-        setVerifiedUsers(dashboardData.users)
+      const parsedSession: AdminSession = JSON.parse(savedSession)
+      const authToken = parsedSession.role === 'owner' ? 'Owner-A2fC-20AS-FAX2-MEL2-234' : 'Admin-A2F2-3SAC-3FSA-GVC2-994'
+
+      // Load verified users
+      const usersResponse = await fetch('https://7tk0rize--admin-api.functions.blink.new', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`
+        },
+        body: JSON.stringify({ action: 'getVerifiedUsers' })
+      })
+      
+      if (usersResponse.ok) {
+        const usersData = await usersResponse.json()
+        if (usersData.success && usersData.users) {
+          setVerifiedUsers(usersData.users.map((user: any) => ({
+            id: user.id,
+            userId: user.user_id,
+            username: user.username,
+            discriminator: '0',
+            avatar: user.avatar_url?.split('/').pop()?.split('.')[0] || null,
+            accessToken: user.has_access_token ? 'present' : '',
+            verifiedAt: user.verified_at
+          })))
+          
+          // Calculate stats
+          const total = usersData.users.length
+          const today = usersData.users.filter((user: any) => {
+            const verifiedDate = new Date(user.verified_at)
+            const todayDate = new Date()
+            return verifiedDate.toDateString() === todayDate.toDateString()
+          }).length
+          
+          const weekAgo = new Date()
+          weekAgo.setDate(weekAgo.getDate() - 7)
+          const week = usersData.users.filter((user: any) => {
+            const verifiedDate = new Date(user.verified_at)
+            return verifiedDate >= weekAgo
+          }).length
+          
+          setStats({ total, today, week })
+        }
       }
 
       // Load bot servers (mock data for now)
@@ -146,19 +186,29 @@ export default function SecureAdminDashboard() {
     }
 
     try {
-      const response = await fetch('https://7tk0rize--admin-api.functions.blink.new/admin/pull', {
+      // Get admin session token
+      const savedSession = localStorage.getItem('admin_session')
+      if (!savedSession) return
+      
+      const parsedSession: AdminSession = JSON.parse(savedSession)
+      const authToken = parsedSession.role === 'owner' ? 'Owner-A2fC-20AS-FAX2-MEL2-234' : 'Admin-A2F2-3SAC-3FSA-GVC2-994'
+
+      const response = await fetch('https://7tk0rize--admin-api.functions.blink.new', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`
+        },
         body: JSON.stringify({
-          guildId: targetGuildId,
-          selectedUsers: selectedUsers
+          action: 'pullUsers',
+          guild_id: targetGuildId
         })
       })
 
       const data = await response.json()
 
       if (data.success) {
-        toast.success(`Successfully initiated pull for ${data.users.length} users to guild ${data.guildId}`)
+        toast.success(`Pull completed! ${data.successful_pulls} users added, ${data.failed_pulls} failed`)
         setSelectedUsers([])
         setTargetGuildId('')
       } else {
@@ -177,12 +227,16 @@ export default function SecureAdminDashboard() {
     }
 
     try {
-      const response = await fetch(`https://7tk0rize--admin-api.functions.blink.new/admin/users/${userId}`, {
-        method: 'DELETE',
+      const response = await fetch('https://7tk0rize--admin-api.functions.blink.new', {
+        method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `OWNER-${session.timestamp}`
-        }
+          'Authorization': 'Bearer Owner-A2fC-20AS-FAX2-MEL2-234'
+        },
+        body: JSON.stringify({
+          action: 'removeUser',
+          user_id: userId
+        })
       })
 
       const data = await response.json()
