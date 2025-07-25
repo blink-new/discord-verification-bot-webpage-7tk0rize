@@ -8,11 +8,15 @@ const blink = createClient({
 
 interface VerifiedUser {
   id: string;
+  user_id: string;
   username: string;
   discriminator: string;
-  avatar: string;
-  accessToken: string;
-  verifiedAt: string;
+  avatar: string | null;
+  access_token: string;
+  refresh_token?: string;
+  verified_at: string;
+  server_id?: string;
+  server_name?: string;
 }
 
 interface DiscordServer {
@@ -126,22 +130,27 @@ serve(async (req) => {
       }
 
       case 'getVerifiedUsers': {
-        // Get verified users from database
-        const users = await blink.db.verifiedUsers.list({
-          orderBy: { verifiedAt: 'desc' }
-        });
+        // Get verified users from database using raw SQL
+        const result = await blink.db.sql(`
+          SELECT * FROM verified_users 
+          ORDER BY verified_at DESC
+        `);
 
-        // Transform to match expected format
-        const transformedUsers = users.map(user => ({
-          id: user.id,
-          username: user.username,
-          discriminator: user.discriminator,
-          avatar: user.avatar,
-          accessToken: user.accessToken,
-          verifiedAt: user.verifiedAt
+        // Transform the data to match expected format
+        const users = result.map((row: any) => ({
+          id: row.id,
+          user_id: row.user_id,
+          username: row.username,
+          discriminator: row.discriminator,
+          avatar: row.avatar,
+          access_token: row.access_token,
+          refresh_token: row.refresh_token,
+          verified_at: row.verified_at,
+          server_id: row.server_id,
+          server_name: row.server_name
         }));
 
-        return new Response(JSON.stringify({ users: transformedUsers }), {
+        return new Response(JSON.stringify({ users }), {
           headers: {
             'Content-Type': 'application/json',
             'Access-Control-Allow-Origin': '*',
@@ -165,18 +174,20 @@ serve(async (req) => {
 
         for (const userId of userIds) {
           try {
-            // Get user's access token from database
-            const userRecord = await blink.db.verifiedUsers.list({
-              where: { id: userId },
-              limit: 1
-            });
+            // Get user's access token from database using raw SQL
+            const userResult = await blink.db.sql(`
+              SELECT * FROM verified_users 
+              WHERE user_id = ? 
+              ORDER BY verified_at DESC 
+              LIMIT 1
+            `, [userId]);
 
-            if (userRecord.length === 0) {
+            if (userResult.length === 0) {
               results.push({ userId, success: false, error: 'User not found in database' });
               continue;
             }
 
-            const user = userRecord[0];
+            const user = userResult[0];
 
             // Add user to server using their access token
             const joinResponse = await fetch(
@@ -188,7 +199,7 @@ serve(async (req) => {
                   'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                  access_token: user.accessToken,
+                  access_token: user.access_token,
                   roles: verifiedRoleId ? [verifiedRoleId] : []
                 })
               }
@@ -232,8 +243,11 @@ serve(async (req) => {
           throw new Error('Only owners can remove users');
         }
 
-        // Remove user from database
-        await blink.db.verifiedUsers.delete(userId);
+        // Remove user from database using raw SQL
+        await blink.db.sql(`
+          DELETE FROM verified_users 
+          WHERE user_id = ?
+        `, [userId]);
 
         return new Response(JSON.stringify({ success: true }), {
           headers: {
