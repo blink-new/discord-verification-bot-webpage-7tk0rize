@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "npm:@blinkdotnew/sdk";
 
 const blink = createClient({
-  projectId: Deno.env.get('BLINK_PROJECT_ID')!,
+  projectId: Deno.env.get('BLINK_PROJECT_ID') || '',
   authRequired: false
 });
 
@@ -12,7 +12,7 @@ serve(async (req) => {
     return new Response(null, {
       headers: {
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+        'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type, Authorization',
       },
     });
@@ -20,43 +20,41 @@ serve(async (req) => {
 
   try {
     const url = new URL(req.url);
-    
-    if (req.method === 'GET') {
-      // Handle GET requests for stats and verified users
-      const action = url.searchParams.get('action');
-      
-      if (action === 'getStats') {
-        const verifiedUsers = await blink.db.verifiedUsers.list();
-        return new Response(JSON.stringify({
-          total: verifiedUsers.length,
-          recent: verifiedUsers.slice(-10).map(user => ({
-            user_id: user.userId,
-            username: user.username,
-            verified_at: user.verifiedAt
-          }))
+    const action = url.searchParams.get('action');
+
+    if (action === 'login') {
+      const { key } = await req.json();
+      const ownerKey = Deno.env.get('OWNER_LOGIN_KEY');
+      const adminKey = Deno.env.get('ADMIN_LOGIN_KEY');
+
+      if (key === ownerKey) {
+        return new Response(JSON.stringify({ 
+          success: true, 
+          role: 'owner',
+          message: 'Owner login successful'
         }), {
           headers: {
             'Content-Type': 'application/json',
             'Access-Control-Allow-Origin': '*',
           },
         });
-      }
-      
-      if (action === 'getVerifiedUsers') {
-        const verifiedUsers = await blink.db.verifiedUsers.list({
-          orderBy: { verifiedAt: 'desc' }
-        });
-        
-        return new Response(JSON.stringify({
-          users: verifiedUsers.map(user => ({
-            id: user.id,
-            user_id: user.userId,
-            username: user.username,
-            avatar_url: user.avatarUrl,
-            verified_at: user.verifiedAt,
-            has_access_token: !!user.accessToken
-          }))
+      } else if (key === adminKey) {
+        return new Response(JSON.stringify({ 
+          success: true, 
+          role: 'admin',
+          message: 'Admin login successful'
         }), {
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+          },
+        });
+      } else {
+        return new Response(JSON.stringify({ 
+          success: false, 
+          message: 'Invalid login key'
+        }), {
+          status: 401,
           headers: {
             'Content-Type': 'application/json',
             'Access-Control-Allow-Origin': '*',
@@ -65,30 +63,33 @@ serve(async (req) => {
       }
     }
 
-    if (req.method === 'POST') {
-      const body = await req.json();
-      
-      // Verify admin authentication for POST requests
-      const authHeader = req.headers.get('Authorization');
-      if (!authHeader) {
-        return new Response(JSON.stringify({ error: 'Unauthorized' }), { 
-          status: 401,
-          headers: {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
-          },
-        });
-      }
+    if (action === 'getVerifiedUsers') {
+      // Get all verified users from database
+      const users = await blink.db.verifiedUsers.list({
+        orderBy: { verifiedAt: 'desc' }
+      });
 
-      const token = authHeader.replace('Bearer ', '');
-      const ownerKey = Deno.env.get('OWNER_LOGIN_KEY');
-      const adminKey = Deno.env.get('ADMIN_LOGIN_KEY');
-      
-      const isOwner = token === ownerKey;
-      const isAdmin = token === adminKey || isOwner;
+      return new Response(JSON.stringify({ 
+        success: true, 
+        users: users || [],
+        count: users?.length || 0
+      }), {
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        },
+      });
+    }
 
-      if (!isAdmin) {
-        return new Response(JSON.stringify({ error: 'Invalid credentials' }), { 
+    if (action === 'removeUser') {
+      const { userId, role } = await req.json();
+      
+      // Only owners can remove users
+      if (role !== 'owner') {
+        return new Response(JSON.stringify({ 
+          success: false, 
+          message: 'Only owners can remove verified users'
+        }), {
           status: 403,
           headers: {
             'Content-Type': 'application/json',
@@ -97,16 +98,29 @@ serve(async (req) => {
         });
       }
 
-      if (body.action === 'stats') {
-        const verifiedUsers = await blink.db.verifiedUsers.list();
-        return new Response(JSON.stringify({
-          success: true,
-          total: verifiedUsers.length,
-          recent_verifications: verifiedUsers.slice(-10).map(user => ({
-            username: user.username,
-            verified_at: user.verifiedAt
-          }))
+      // Remove user from database
+      await blink.db.verifiedUsers.delete(userId);
+
+      return new Response(JSON.stringify({ 
+        success: true, 
+        message: 'User removed successfully'
+      }), {
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        },
+      });
+    }
+
+    if (action === 'pullUsers') {
+      const { guildId, userIds } = await req.json();
+      
+      if (!guildId || !userIds || !Array.isArray(userIds)) {
+        return new Response(JSON.stringify({ 
+          success: false, 
+          message: 'Guild ID and user IDs are required'
         }), {
+          status: 400,
           headers: {
             'Content-Type': 'application/json',
             'Access-Control-Allow-Origin': '*',
@@ -114,22 +128,15 @@ serve(async (req) => {
         });
       }
 
-      if (body.action === 'getVerifiedUsers') {
-        const verifiedUsers = await blink.db.verifiedUsers.list({
-          orderBy: { verifiedAt: 'desc' }
-        });
-        
-        return new Response(JSON.stringify({
-          success: true,
-          users: verifiedUsers.map(user => ({
-            id: user.id,
-            user_id: user.userId,
-            username: user.username,
-            avatar_url: user.avatarUrl,
-            verified_at: user.verifiedAt,
-            has_access_token: !!user.accessToken
-          }))
+      const botToken = Deno.env.get('DISCORD_BOT_TOKEN');
+      const verifiedRoleId = Deno.env.get('DISCORD_VERIFIED_ROLE_ID');
+      
+      if (!botToken) {
+        return new Response(JSON.stringify({ 
+          success: false, 
+          message: 'Bot token not configured'
         }), {
+          status: 500,
           headers: {
             'Content-Type': 'application/json',
             'Access-Control-Allow-Origin': '*',
@@ -137,158 +144,74 @@ serve(async (req) => {
         });
       }
 
-      if (body.action === 'pullUsers') {
-        const { guild_id } = body;
-
-        if (!guild_id) {
-          return new Response(JSON.stringify({ 
-            success: false, 
-            error: 'Guild ID is required' 
-          }), { 
-            status: 400,
-            headers: {
-              'Content-Type': 'application/json',
-              'Access-Control-Allow-Origin': '*',
-            },
+      const results = [];
+      
+      for (const userId of userIds) {
+        try {
+          // Get user data from database
+          const userData = await blink.db.verifiedUsers.list({
+            where: { userId: userId },
+            limit: 1
           });
-        }
 
-        const verifiedUsers = await blink.db.verifiedUsers.list();
-        const results = [];
-
-        for (const user of verifiedUsers) {
-          if (!user.accessToken) {
-            results.push({
-              user_id: user.userId,
-              username: user.username,
-              success: false,
-              error: 'No access token available'
-            });
+          if (!userData || userData.length === 0) {
+            results.push({ userId, success: false, error: 'User not found in database' });
             continue;
           }
 
-          try {
-            // Add user to guild using their access token
-            const response = await fetch(`https://discord.com/api/guilds/${guild_id}/members/${user.userId}`, {
-              method: 'PUT',
-              headers: {
-                'Authorization': `Bot ${Deno.env.get('DISCORD_BOT_TOKEN')}`,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                access_token: user.accessToken,
-                roles: [Deno.env.get('DISCORD_VERIFIED_ROLE_ID')]
-              }),
-            });
+          const user = userData[0];
+          
+          // Add user to guild using their access token
+          const addResponse = await fetch(`https://discord.com/api/v10/guilds/${guildId}/members/${userId}`, {
+            method: 'PUT',
+            headers: {
+              'Authorization': `Bot ${botToken}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              access_token: user.accessToken,
+              roles: verifiedRoleId ? [verifiedRoleId] : []
+            }),
+          });
 
-            if (response.ok || response.status === 204) {
-              results.push({
-                user_id: user.userId,
-                username: user.username,
-                success: true,
-                error: null
-              });
-            } else {
-              const errorText = await response.text();
-              results.push({
-                user_id: user.userId,
-                username: user.username,
-                success: false,
-                error: `Discord API error: ${response.status} - ${errorText}`
-              });
-            }
-          } catch (error) {
-            results.push({
-              user_id: user.userId,
-              username: user.username,
-              success: false,
-              error: error.message
+          if (addResponse.ok || addResponse.status === 204) {
+            results.push({ userId, success: true, username: user.username });
+          } else {
+            const errorText = await addResponse.text();
+            results.push({ 
+              userId, 
+              success: false, 
+              error: `Discord API error: ${addResponse.status} - ${errorText}` 
             });
           }
-
-          // Rate limiting - wait between requests
-          await new Promise(resolve => setTimeout(resolve, 1000));
+        } catch (error) {
+          results.push({ 
+            userId, 
+            success: false, 
+            error: `Error: ${error.message}` 
+          });
         }
-
-        return new Response(JSON.stringify({
-          success: true,
-          guild_id,
-          total_users: verifiedUsers.length,
-          successful_pulls: results.filter(r => r.success).length,
-          failed_pulls: results.filter(r => !r.success).length,
-          results
-        }), {
-          headers: {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
-          },
-        });
       }
 
-      if (body.action === 'removeUser') {
-        // Remove verified user (owner only)
-        if (!isOwner) {
-          return new Response(JSON.stringify({ 
-            success: false, 
-            error: 'Owner access required' 
-          }), { 
-            status: 403,
-            headers: {
-              'Content-Type': 'application/json',
-              'Access-Control-Allow-Origin': '*',
-            },
-          });
-        }
-
-        const { user_id } = body;
-
-        if (!user_id) {
-          return new Response(JSON.stringify({ 
-            success: false, 
-            error: 'User ID is required' 
-          }), { 
-            status: 400,
-            headers: {
-              'Content-Type': 'application/json',
-              'Access-Control-Allow-Origin': '*',
-            },
-          });
-        }
-
-        // Find and delete the user
-        const verifiedUsers = await blink.db.verifiedUsers.list({
-          where: { userId: user_id }
-        });
-
-        if (verifiedUsers.length === 0) {
-          return new Response(JSON.stringify({ 
-            success: false, 
-            error: 'User not found' 
-          }), { 
-            status: 404,
-            headers: {
-              'Content-Type': 'application/json',
-              'Access-Control-Allow-Origin': '*',
-            },
-          });
-        }
-
-        await blink.db.verifiedUsers.delete(verifiedUsers[0].id);
-
-        return new Response(JSON.stringify({
-          success: true,
-          message: `Removed user ${user_id}`
-        }), {
-          headers: {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
-          },
-        });
-      }
+      const successCount = results.filter(r => r.success).length;
+      
+      return new Response(JSON.stringify({ 
+        success: true, 
+        message: `Successfully pulled ${successCount}/${userIds.length} users to server`,
+        results
+      }), {
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        },
+      });
     }
 
-    return new Response(JSON.stringify({ error: 'Not found' }), { 
-      status: 404,
+    return new Response(JSON.stringify({ 
+      success: false, 
+      message: 'Invalid action'
+    }), {
+      status: 400,
       headers: {
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': '*',
@@ -296,11 +219,11 @@ serve(async (req) => {
     });
 
   } catch (error) {
-    console.error('Admin API error:', error);
+    console.error('Admin API Error:', error);
     return new Response(JSON.stringify({ 
       success: false, 
-      error: `Internal server error: ${error.message}` 
-    }), { 
+      message: `Server error: ${error.message}`
+    }), {
       status: 500,
       headers: {
         'Content-Type': 'application/json',

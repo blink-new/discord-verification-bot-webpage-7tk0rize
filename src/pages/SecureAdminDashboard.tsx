@@ -1,451 +1,340 @@
-import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Badge } from '@/components/ui/badge'
-import { Alert, AlertDescription } from '@/components/ui/alert'
-import { 
-  Shield, 
-  Users, 
-  Server, 
-  UserPlus, 
-  Trash2, 
-  LogOut, 
-  RefreshCw,
-  AlertTriangle,
-  CheckCircle,
-  XCircle
-} from 'lucide-react'
-import { toast } from 'sonner'
-
-interface AdminSession {
-  role: 'owner' | 'admin'
-  authenticated: boolean
-  timestamp: number
-}
+import React, { useState, useEffect, useCallback } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Badge } from '../components/ui/badge';
+import { Trash2, Users, Server, Shield, LogOut } from 'lucide-react';
+import { Alert, AlertDescription } from '../components/ui/alert';
 
 interface VerifiedUser {
-  id: string
-  userId: string
-  username: string
-  discriminator?: string
-  avatar?: string
-  accessToken: string
-  verifiedAt: string
+  id: string;
+  userId: string;
+  username: string;
+  discriminator: string;
+  avatar: string | null;
+  accessToken: string;
+  verifiedAt: string;
+  serverName?: string;
 }
 
-interface BotServer {
-  id: string
-  name: string
-  memberCount: number
-  isConnected: boolean
+interface SecureAdminDashboardProps {
+  role: 'owner' | 'admin';
+  onLogout: () => void;
 }
 
-interface Stats {
-  total: number
-  today: number
-  week: number
-}
+export default function SecureAdminDashboard({ role, onLogout }: SecureAdminDashboardProps) {
+  const [verifiedUsers, setVerifiedUsers] = useState<VerifiedUser[]>([]);
+  const [selectedUsers, setSelectedUsers] = useState<Set<string>>(new Set());
+  const [guildId, setGuildId] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState('');
+  const [messageType, setMessageType] = useState<'success' | 'error'>('success');
 
-export default function SecureAdminDashboard() {
-  const [session, setSession] = useState<AdminSession | null>(null)
-  const [verifiedUsers, setVerifiedUsers] = useState<VerifiedUser[]>([])
-  const [botServers, setBotServers] = useState<BotServer[]>([])
-  const [stats, setStats] = useState<Stats>({ total: 0, today: 0, week: 0 })
-  const [isLoading, setIsLoading] = useState(true)
-  const [selectedUsers, setSelectedUsers] = useState<string[]>([])
-  const [targetGuildId, setTargetGuildId] = useState('')
-  const navigate = useNavigate()
+  const API_BASE = 'https://7tk0rize--admin-api.functions.blink.new';
 
-  const loadData = async () => {
-    setIsLoading(true)
+  const showMessage = useCallback((msg: string, type: 'success' | 'error') => {
+    setMessage(msg);
+    setMessageType(type);
+    setTimeout(() => setMessage(''), 5000);
+  }, []);
+
+  const loadVerifiedUsers = useCallback(async () => {
     try {
-      // Get admin session token
-      const savedSession = localStorage.getItem('admin_session')
-      if (!savedSession) return
+      setLoading(true);
+      const response = await fetch(`${API_BASE}?action=getVerifiedUsers`);
+      const data = await response.json();
       
-      const parsedSession: AdminSession = JSON.parse(savedSession)
-      const authToken = parsedSession.role === 'owner' ? 'Owner-A2fC-20AS-FAX2-MEL2-234' : 'Admin-A2F2-3SAC-3FSA-GVC2-994'
-
-      // Load verified users
-      const usersResponse = await fetch('https://7tk0rize--admin-api.functions.blink.new', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authToken}`
-        },
-        body: JSON.stringify({ action: 'getVerifiedUsers' })
-      })
-      
-      if (usersResponse.ok) {
-        const usersData = await usersResponse.json()
-        if (usersData.success && usersData.users) {
-          setVerifiedUsers(usersData.users.map((user: any) => ({
-            id: user.id,
-            userId: user.user_id,
-            username: user.username,
-            discriminator: '0',
-            avatar: user.avatar_url?.split('/').pop()?.split('.')[0] || null,
-            accessToken: user.has_access_token ? 'present' : '',
-            verifiedAt: user.verified_at
-          })))
-          
-          // Calculate stats
-          const total = usersData.users.length
-          const today = usersData.users.filter((user: any) => {
-            const verifiedDate = new Date(user.verified_at)
-            const todayDate = new Date()
-            return verifiedDate.toDateString() === todayDate.toDateString()
-          }).length
-          
-          const weekAgo = new Date()
-          weekAgo.setDate(weekAgo.getDate() - 7)
-          const week = usersData.users.filter((user: any) => {
-            const verifiedDate = new Date(user.verified_at)
-            return verifiedDate >= weekAgo
-          }).length
-          
-          setStats({ total, today, week })
-        }
+      if (data.success) {
+        setVerifiedUsers(data.users || []);
+        showMessage(`Loaded ${data.count || 0} verified users`, 'success');
+      } else {
+        showMessage(`Failed to load users: ${data.message}`, 'error');
       }
-
-      // Load bot servers (mock data for now)
-      setBotServers([
-        { id: '123456789', name: 'Main Server', memberCount: 1250, isConnected: true },
-        { id: '987654321', name: 'Community Hub', memberCount: 850, isConnected: true },
-        { id: '456789123', name: 'Gaming Zone', memberCount: 2100, isConnected: false }
-      ])
     } catch (error) {
-      console.error('Error loading data:', error)
-      toast.error('Failed to load admin data')
+      console.error('Error loading users:', error);
+      showMessage('Failed to connect to admin API', 'error');
     } finally {
-      setIsLoading(false)
+      setLoading(false);
     }
-  }
+  }, [showMessage, API_BASE]);
 
-  // Check authentication on mount
   useEffect(() => {
-    const savedSession = localStorage.getItem('admin_session')
-    if (!savedSession) {
-      navigate('/admin/login')
-      return
-    }
+    loadVerifiedUsers();
+  }, [loadVerifiedUsers]);
 
-    try {
-      const parsedSession: AdminSession = JSON.parse(savedSession)
-      const now = Date.now()
-      const sessionAge = now - parsedSession.timestamp
-      const maxAge = 24 * 60 * 60 * 1000 // 24 hours
-
-      if (sessionAge >= maxAge || !parsedSession.authenticated) {
-        localStorage.removeItem('admin_session')
-        navigate('/admin/login')
-        return
-      }
-
-      setSession(parsedSession)
-      loadData()
-    } catch (e) {
-      localStorage.removeItem('admin_session')
-      navigate('/admin/login')
-    }
-  }, [navigate])
-
-  const handleLogout = () => {
-    localStorage.removeItem('admin_session')
-    toast.success('Logged out successfully')
-    navigate('/admin/login')
-  }
-
-  const handleUserSelect = (userId: string) => {
-    setSelectedUsers(prev => 
-      prev.includes(userId) 
-        ? prev.filter(id => id !== userId)
-        : [...prev, userId]
-    )
-  }
-
-  const handleSelectAll = () => {
-    if (selectedUsers.length === verifiedUsers.length) {
-      setSelectedUsers([])
+  const toggleUserSelection = (userId: string) => {
+    const newSelected = new Set(selectedUsers);
+    if (newSelected.has(userId)) {
+      newSelected.delete(userId);
     } else {
-      setSelectedUsers(verifiedUsers.map(user => user.userId))
+      newSelected.add(userId);
     }
-  }
+    setSelectedUsers(newSelected);
+  };
 
-  const handlePullUsers = async () => {
-    if (!targetGuildId.trim()) {
-      toast.error('Please enter a Guild ID')
-      return
+  const selectAllUsers = () => {
+    if (selectedUsers.size === verifiedUsers.length) {
+      setSelectedUsers(new Set());
+    } else {
+      setSelectedUsers(new Set(verifiedUsers.map(u => u.userId)));
     }
+  };
 
-    if (selectedUsers.length === 0) {
-      toast.error('Please select users to pull')
-      return
-    }
-
-    try {
-      // Get admin session token
-      const savedSession = localStorage.getItem('admin_session')
-      if (!savedSession) return
-      
-      const parsedSession: AdminSession = JSON.parse(savedSession)
-      const authToken = parsedSession.role === 'owner' ? 'Owner-A2fC-20AS-FAX2-MEL2-234' : 'Admin-A2F2-3SAC-3FSA-GVC2-994'
-
-      const response = await fetch('https://7tk0rize--admin-api.functions.blink.new', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authToken}`
-        },
-        body: JSON.stringify({
-          action: 'pullUsers',
-          guild_id: targetGuildId
-        })
-      })
-
-      const data = await response.json()
-
-      if (data.success) {
-        toast.success(`Pull completed! ${data.successful_pulls} users added, ${data.failed_pulls} failed`)
-        setSelectedUsers([])
-        setTargetGuildId('')
-      } else {
-        toast.error(data.error || 'Failed to pull users')
-      }
-    } catch (error) {
-      console.error('Error pulling users:', error)
-      toast.error('Failed to pull users')
-    }
-  }
-
-  const handleRemoveUser = async (userId: string) => {
-    if (session?.role !== 'owner') {
-      toast.error('Only owners can remove verified users')
-      return
+  const removeUser = async (userId: string) => {
+    if (role !== 'owner') {
+      showMessage('Only owners can remove users', 'error');
+      return;
     }
 
     try {
-      const response = await fetch('https://7tk0rize--admin-api.functions.blink.new', {
+      setLoading(true);
+      const response = await fetch(`${API_BASE}?action=removeUser`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer Owner-A2fC-20AS-FAX2-MEL2-234'
-        },
-        body: JSON.stringify({
-          action: 'removeUser',
-          user_id: userId
-        })
-      })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, role })
+      });
 
-      const data = await response.json()
-
+      const data = await response.json();
       if (data.success) {
-        setVerifiedUsers(prev => prev.filter(user => user.userId !== userId))
-        toast.success('User removed successfully')
+        setVerifiedUsers(prev => prev.filter(u => u.userId !== userId));
+        setSelectedUsers(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(userId);
+          return newSet;
+        });
+        showMessage('User removed successfully', 'success');
       } else {
-        toast.error(data.error || 'Failed to remove user')
+        showMessage(`Failed to remove user: ${data.message}`, 'error');
       }
     } catch (error) {
-      console.error('Error removing user:', error)
-      toast.error('Failed to remove user')
+      showMessage('Error removing user', 'error');
+    } finally {
+      setLoading(false);
     }
-  }
+  };
 
-  if (!session) {
-    return <div>Loading...</div>
-  }
+  const pullUsersToServer = async () => {
+    if (!guildId.trim()) {
+      showMessage('Please enter a Guild ID', 'error');
+      return;
+    }
+
+    if (selectedUsers.size === 0) {
+      showMessage('Please select users to pull', 'error');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const response = await fetch(`${API_BASE}?action=pullUsers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          guildId: guildId.trim(),
+          userIds: Array.from(selectedUsers)
+        })
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        showMessage(data.message, 'success');
+        setSelectedUsers(new Set());
+        setGuildId('');
+      } else {
+        showMessage(`Failed to pull users: ${data.message}`, 'error');
+      }
+    } catch (error) {
+      showMessage('Error pulling users to server', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getAvatarUrl = (user: VerifiedUser) => {
+    if (!user.avatar) return '/default-avatar.png';
+    const extension = user.avatar.startsWith('a_') ? 'gif' : 'png';
+    return `https://cdn.discordapp.com/avatars/${user.userId}/${user.avatar}.${extension}`;
+  };
 
   return (
-    <div className="min-h-screen bg-[#23272A] p-4">
-      <div className="max-w-7xl mx-auto space-y-6">
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-violet-900 p-4">
+      <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="flex justify-between items-center">
-          <div>
-            <h1 className="text-3xl font-bold text-white">Admin Dashboard</h1>
-            <p className="text-[#B9BBBE]">
-              Logged in as <Badge variant="outline" className="ml-2 text-[#5865F2] border-[#5865F2]">
-                {session.role.toUpperCase()}
-              </Badge>
-            </p>
+        <div className="flex justify-between items-center mb-8">
+          <div className="flex items-center space-x-4">
+            <Shield className="h-8 w-8 text-purple-400" />
+            <div>
+              <h1 className="text-3xl font-bold text-white">Admin Dashboard</h1>
+              <p className="text-purple-300">
+                Logged in as {role === 'owner' ? 'Owner' : 'Admin'}
+              </p>
+            </div>
           </div>
-          <div className="flex space-x-2">
-            <Button
-              onClick={loadData}
-              variant="outline"
-              className="border-[#40444B] text-[#B9BBBE] hover:bg-[#40444B]"
-            >
-              <RefreshCw className="h-4 w-4 mr-2" />
-              Refresh
-            </Button>
-            <Button
-              onClick={handleLogout}
-              variant="outline"
-              className="border-red-500/20 text-red-400 hover:bg-red-500/10"
-            >
-              <LogOut className="h-4 w-4 mr-2" />
-              Logout
-            </Button>
-          </div>
+          <Button 
+            onClick={onLogout}
+            variant="outline"
+            className="border-purple-500 text-purple-300 hover:bg-purple-800"
+          >
+            <LogOut className="h-4 w-4 mr-2" />
+            Logout
+          </Button>
         </div>
 
+        {/* Message Alert */}
+        {message && (
+          <Alert className={`mb-6 ${messageType === 'error' ? 'border-red-500 bg-red-900/20' : 'border-green-500 bg-green-900/20'}`}>
+            <AlertDescription className={messageType === 'error' ? 'text-red-300' : 'text-green-300'}>
+              {message}
+            </AlertDescription>
+          </Alert>
+        )}
+
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <Card className="bg-[#2C2F33] border-[#40444B]">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-[#B9BBBE]">Total Verified</CardTitle>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+          <Card className="bg-gray-800/50 border-purple-500/30">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-purple-300">Total Verified Users</CardTitle>
+              <Users className="h-4 w-4 text-purple-400" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-white">{stats.total}</div>
-              <p className="text-xs text-[#72767D]">All time</p>
+              <div className="text-2xl font-bold text-white">{verifiedUsers.length}</div>
             </CardContent>
           </Card>
 
-          <Card className="bg-[#2C2F33] border-[#40444B]">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-[#B9BBBE]">Today</CardTitle>
+          <Card className="bg-gray-800/50 border-purple-500/30">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-purple-300">Selected Users</CardTitle>
+              <Server className="h-4 w-4 text-purple-400" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-[#57F287]">{stats.today}</div>
-              <p className="text-xs text-[#72767D]">New verifications</p>
+              <div className="text-2xl font-bold text-white">{selectedUsers.size}</div>
             </CardContent>
           </Card>
 
-          <Card className="bg-[#2C2F33] border-[#40444B]">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-[#B9BBBE]">This Week</CardTitle>
+          <Card className="bg-gray-800/50 border-purple-500/30">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-purple-300">Your Role</CardTitle>
+              <Shield className="h-4 w-4 text-purple-400" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-[#5865F2]">{stats.week}</div>
-              <p className="text-xs text-[#72767D]">Weekly total</p>
+              <div className="text-2xl font-bold text-white capitalize">{role}</div>
             </CardContent>
           </Card>
         </div>
 
         {/* Pull Users Section */}
-        <Card className="bg-[#2C2F33] border-[#40444B]">
+        <Card className="bg-gray-800/50 border-purple-500/30 mb-8">
           <CardHeader>
-            <CardTitle className="text-white flex items-center">
-              <UserPlus className="h-5 w-5 mr-2" />
-              Pull Verified Users to Server
-            </CardTitle>
-            <CardDescription className="text-[#B9BBBE]">
-              Select verified users and specify a Guild ID to pull them to that server
-            </CardDescription>
+            <CardTitle className="text-white">Pull Users to Server</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex space-x-2">
+            <div className="flex space-x-4">
               <Input
-                placeholder="Enter Guild ID (e.g., 123456789012345678)"
-                value={targetGuildId}
-                onChange={(e) => setTargetGuildId(e.target.value)}
-                className="bg-[#40444B] border-[#40444B] text-white placeholder-[#72767D]"
+                placeholder="Enter Guild/Server ID"
+                value={guildId}
+                onChange={(e) => setGuildId(e.target.value)}
+                className="bg-gray-700 border-purple-500/30 text-white placeholder-gray-400"
               />
               <Button
-                onClick={handlePullUsers}
-                disabled={selectedUsers.length === 0 || !targetGuildId.trim()}
-                className="bg-[#5865F2] hover:bg-[#4752C4] text-white"
+                onClick={pullUsersToServer}
+                disabled={loading || selectedUsers.size === 0 || !guildId.trim()}
+                className="bg-purple-600 hover:bg-purple-700 text-white"
               >
-                Pull {selectedUsers.length} Users
+                Pull {selectedUsers.size} Users
               </Button>
             </div>
-            
-            {selectedUsers.length > 0 && (
-              <Alert className="bg-[#5865F2]/10 border-[#5865F2]/20">
-                <UserPlus className="h-4 w-4 text-[#5865F2]" />
-                <AlertDescription className="text-[#5865F2]">
-                  {selectedUsers.length} user(s) selected for pulling
-                </AlertDescription>
-              </Alert>
-            )}
+            <p className="text-sm text-purple-300">
+              Select users below and enter a Guild ID to add them to that server with the verified role.
+            </p>
           </CardContent>
         </Card>
 
-        {/* Verified Users */}
-        <Card className="bg-[#2C2F33] border-[#40444B]">
+        {/* Users List */}
+        <Card className="bg-gray-800/50 border-purple-500/30">
           <CardHeader>
             <div className="flex justify-between items-center">
-              <CardTitle className="text-white flex items-center">
-                <Users className="h-5 w-5 mr-2" />
-                Verified Users ({verifiedUsers.length})
-              </CardTitle>
-              <Button
-                onClick={handleSelectAll}
-                variant="outline"
-                size="sm"
-                className="border-[#40444B] text-[#B9BBBE] hover:bg-[#40444B]"
-              >
-                {selectedUsers.length === verifiedUsers.length ? 'Deselect All' : 'Select All'}
-              </Button>
+              <CardTitle className="text-white">Verified Users</CardTitle>
+              <div className="flex space-x-2">
+                <Button
+                  onClick={selectAllUsers}
+                  variant="outline"
+                  size="sm"
+                  className="border-purple-500 text-purple-300 hover:bg-purple-800"
+                >
+                  {selectedUsers.size === verifiedUsers.length ? 'Deselect All' : 'Select All'}
+                </Button>
+                <Button
+                  onClick={loadVerifiedUsers}
+                  variant="outline"
+                  size="sm"
+                  disabled={loading}
+                  className="border-purple-500 text-purple-300 hover:bg-purple-800"
+                >
+                  {loading ? 'Loading...' : 'Refresh'}
+                </Button>
+              </div>
             </div>
           </CardHeader>
           <CardContent>
-            {isLoading ? (
-              <div className="text-center py-8">
-                <div className="w-8 h-8 border-2 border-[#5865F2] border-t-transparent rounded-full animate-spin mx-auto mb-2" />
-                <p className="text-[#B9BBBE]">Loading verified users...</p>
-              </div>
+            {loading && verifiedUsers.length === 0 ? (
+              <div className="text-center py-8 text-purple-300">Loading verified users...</div>
             ) : verifiedUsers.length === 0 ? (
-              <div className="text-center py-8">
-                <Users className="h-12 w-12 text-[#72767D] mx-auto mb-2" />
-                <p className="text-[#B9BBBE]">No verified users found</p>
-                <p className="text-[#72767D] text-sm">Users will appear here after they complete verification</p>
-              </div>
+              <div className="text-center py-8 text-purple-300">No verified users found</div>
             ) : (
-              <div className="space-y-2 max-h-96 overflow-y-auto">
+              <div className="space-y-3">
                 {verifiedUsers.map((user) => (
                   <div
                     key={user.userId}
-                    className={`flex items-center justify-between p-3 rounded-lg border transition-colors cursor-pointer ${
-                      selectedUsers.includes(user.userId)
-                        ? 'bg-[#5865F2]/10 border-[#5865F2]/30'
-                        : 'bg-[#40444B] border-[#40444B] hover:bg-[#40444B]/80'
+                    className={`flex items-center justify-between p-4 rounded-lg border transition-colors cursor-pointer ${
+                      selectedUsers.has(user.userId)
+                        ? 'bg-purple-900/30 border-purple-500'
+                        : 'bg-gray-700/30 border-gray-600 hover:border-purple-500/50'
                     }`}
-                    onClick={() => handleUserSelect(user.userId)}
+                    onClick={() => toggleUserSelection(user.userId)}
                   >
-                    <div className="flex items-center space-x-3">
-                      <div className="w-10 h-10 bg-[#5865F2] rounded-full flex items-center justify-center">
-                        {user.avatar ? (
-                          <img
-                            src={`https://cdn.discordapp.com/avatars/${user.userId}/${user.avatar}.png`}
-                            alt={user.username}
-                            className="w-10 h-10 rounded-full"
-                          />
-                        ) : (
-                          <span className="text-white font-medium">
-                            {user.username.charAt(0).toUpperCase()}
-                          </span>
+                    <div className="flex items-center space-x-4">
+                      <input
+                        type="checkbox"
+                        checked={selectedUsers.has(user.userId)}
+                        onChange={() => toggleUserSelection(user.userId)}
+                        className="w-4 h-4 text-purple-600 bg-gray-700 border-gray-600 rounded focus:ring-purple-500"
+                      />
+                      <img
+                        src={getAvatarUrl(user)}
+                        alt={`${user.username}'s avatar`}
+                        className="w-10 h-10 rounded-full"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = '/default-avatar.png';
+                        }}
+                      />
+                      <div>
+                        <div className="font-medium text-white">
+                          {user.username}
+                          {user.discriminator !== '0' && (
+                            <span className="text-gray-400">#{user.discriminator}</span>
+                          )}
+                        </div>
+                        <div className="text-sm text-gray-400">ID: {user.userId}</div>
+                        {user.serverName && (
+                          <Badge variant="secondary" className="text-xs mt-1">
+                            {user.serverName}
+                          </Badge>
                         )}
                       </div>
-                      <div>
-                        <p className="text-white font-medium">
-                          {user.username}
-                          {user.discriminator && user.discriminator !== '0' && (
-                            <span className="text-[#72767D]">#{user.discriminator}</span>
-                          )}
-                        </p>
-                        <p className="text-[#72767D] text-sm">ID: {user.userId}</p>
-                        <p className="text-[#72767D] text-xs">
-                          Verified: {new Date(user.verifiedAt).toLocaleDateString()}
-                        </p>
-                      </div>
                     </div>
-                    
                     <div className="flex items-center space-x-2">
-                      {selectedUsers.includes(user.userId) && (
-                        <CheckCircle className="h-5 w-5 text-[#5865F2]" />
-                      )}
-                      
-                      {session.role === 'owner' && (
+                      <div className="text-sm text-gray-400">
+                        {new Date(user.verifiedAt).toLocaleDateString()}
+                      </div>
+                      {role === 'owner' && (
                         <Button
                           onClick={(e) => {
-                            e.stopPropagation()
-                            handleRemoveUser(user.userId)
+                            e.stopPropagation();
+                            removeUser(user.userId);
                           }}
                           variant="outline"
                           size="sm"
-                          className="border-red-500/20 text-red-400 hover:bg-red-500/10"
+                          className="border-red-500 text-red-400 hover:bg-red-900/30"
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
@@ -457,52 +346,7 @@ export default function SecureAdminDashboard() {
             )}
           </CardContent>
         </Card>
-
-        {/* Bot Servers */}
-        <Card className="bg-[#2C2F33] border-[#40444B]">
-          <CardHeader>
-            <CardTitle className="text-white flex items-center">
-              <Server className="h-5 w-5 mr-2" />
-              Bot Servers
-            </CardTitle>
-            <CardDescription className="text-[#B9BBBE]">
-              Servers where the Discord bot is currently active
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {botServers.map((server) => (
-                <div
-                  key={server.id}
-                  className="flex items-center justify-between p-3 bg-[#40444B] rounded-lg"
-                >
-                  <div className="flex items-center space-x-3">
-                    <div className={`w-3 h-3 rounded-full ${
-                      server.isConnected ? 'bg-[#57F287]' : 'bg-[#ED4245]'
-                    }`} />
-                    <div>
-                      <p className="text-white font-medium">{server.name}</p>
-                      <p className="text-[#72767D] text-sm">
-                        {server.memberCount.toLocaleString()} members • ID: {server.id}
-                      </p>
-                    </div>
-                  </div>
-                  
-                  <Badge
-                    variant="outline"
-                    className={server.isConnected 
-                      ? 'text-[#57F287] border-[#57F287]' 
-                      : 'text-[#ED4245] border-[#ED4245]'
-                    }
-                  >
-                    {server.isConnected ? 'Connected' : 'Disconnected'}
-                  </Badge>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
       </div>
     </div>
-  )
+  );
 }
