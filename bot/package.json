@@ -1,0 +1,21 @@
+{
+  "name": "discord-verification-bot",
+  "version": "1.0.0",
+  "description": "Discord verification bot with web interface",
+  "main": "discord-bot.js",
+  "scripts": {
+    "start": "node discord-bot.js",
+    "dev": "nodemon discord-bot.js"
+  },
+  "dependencies": {
+    "@blinkdotnew/sdk": "^0.17.2",
+    "discord.js": "^14.14.1",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  },
+  "keywords": ["discord", "bot", "verification", "oauth"],
+  "author": "Blink",
+  "license": "MIT"
+}
