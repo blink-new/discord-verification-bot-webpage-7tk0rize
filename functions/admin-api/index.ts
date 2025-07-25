@@ -64,15 +64,29 @@ serve(async (req) => {
     }
 
     if (action === 'getVerifiedUsers') {
-      // Get all verified users from database
+      // Get all verified users from database using snake_case field names
       const users = await blink.db.verifiedUsers.list({
-        orderBy: { verifiedAt: 'desc' }
+        orderBy: { verified_at: 'desc' }
       });
+
+      // Convert snake_case to camelCase for frontend
+      const formattedUsers = users.map(user => ({
+        id: user.id,
+        userId: user.user_id,
+        username: user.username,
+        discriminator: user.discriminator,
+        avatar: user.avatar,
+        accessToken: user.access_token,
+        refreshToken: user.refresh_token,
+        verifiedAt: user.verified_at,
+        serverId: user.server_id,
+        serverName: user.server_name
+      }));
 
       return new Response(JSON.stringify({ 
         success: true, 
-        users: users || [],
-        count: users?.length || 0
+        users: formattedUsers || [],
+        count: formattedUsers?.length || 0
       }), {
         headers: {
           'Content-Type': 'application/json',
@@ -98,18 +112,35 @@ serve(async (req) => {
         });
       }
 
-      // Remove user from database
-      await blink.db.verifiedUsers.delete(userId);
-
-      return new Response(JSON.stringify({ 
-        success: true, 
-        message: 'User removed successfully'
-      }), {
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-        },
+      // Find user by user_id and delete
+      const users = await blink.db.verifiedUsers.list({
+        where: { user_id: userId },
+        limit: 1
       });
+
+      if (users && users.length > 0) {
+        await blink.db.verifiedUsers.delete(users[0].id);
+        return new Response(JSON.stringify({ 
+          success: true, 
+          message: 'User removed successfully'
+        }), {
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+          },
+        });
+      } else {
+        return new Response(JSON.stringify({ 
+          success: false, 
+          message: 'User not found'
+        }), {
+          status: 404,
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+          },
+        });
+      }
     }
 
     if (action === 'pullUsers') {
@@ -148,9 +179,9 @@ serve(async (req) => {
       
       for (const userId of userIds) {
         try {
-          // Get user data from database
+          // Get user data from database using snake_case field name
           const userData = await blink.db.verifiedUsers.list({
-            where: { userId: userId },
+            where: { user_id: userId },
             limit: 1
           });
 
@@ -169,13 +200,27 @@ serve(async (req) => {
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-              access_token: user.accessToken,
+              access_token: user.access_token,
               roles: verifiedRoleId ? [verifiedRoleId] : []
             }),
           });
 
           if (addResponse.ok || addResponse.status === 204) {
             results.push({ userId, success: true, username: user.username });
+          } else if (addResponse.status === 409) {
+            // User already in server - try to add role
+            const roleResponse = await fetch(`https://discord.com/api/v10/guilds/${guildId}/members/${userId}/roles/${verifiedRoleId}`, {
+              method: 'PUT',
+              headers: {
+                'Authorization': `Bot ${botToken}`,
+              },
+            });
+            
+            if (roleResponse.ok || roleResponse.status === 204) {
+              results.push({ userId, success: true, username: user.username, note: 'Role added (user already in server)' });
+            } else {
+              results.push({ userId, success: false, error: 'User already in server, failed to add role' });
+            }
           } else {
             const errorText = await addResponse.text();
             results.push({ 

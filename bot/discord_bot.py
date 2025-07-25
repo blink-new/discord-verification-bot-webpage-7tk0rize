@@ -82,7 +82,7 @@ async def stats(ctx):
                         total_verified = len(users)
                         
                         # Count users from this server
-                        server_verified = len([u for u in users if u.get('server_id') == str(ctx.guild.id)])
+                        server_verified = len([u for u in users if u.get('serverId') == str(ctx.guild.id)])
                         
                         embed = discord.Embed(
                             title="📊 Verification Statistics",
@@ -128,8 +128,8 @@ async def pull_users(ctx, limit: int = None):
                 if limit and limit > 0:
                     users = users[:limit]
                 
-                # Extract user IDs
-                user_ids = [user['user_id'] for user in users]
+                # Extract user IDs (using camelCase from API response)
+                user_ids = [user['userId'] for user in users]
                 
                 # Pull users using admin API
                 pull_data = {
@@ -160,12 +160,23 @@ async def pull_users(ctx, limit: int = None):
                                     value=f"✅ {success_count}/{total_count} users added successfully",
                                     inline=False
                                 )
+                                
+                                # Show some details about failed attempts
+                                failed_results = [r for r in result['results'] if not r.get('success')]
+                                if failed_results and len(failed_results) <= 3:
+                                    failed_details = "\n".join([f"• {r.get('error', 'Unknown error')}" for r in failed_results[:3]])
+                                    embed.add_field(
+                                        name="Failed Attempts",
+                                        value=failed_details,
+                                        inline=False
+                                    )
                             
                             await ctx.send(embed=embed)
                         else:
                             await ctx.send(f"❌ Pull failed: {result.get('message', 'Unknown error')}")
                     else:
-                        await ctx.send(f"❌ Pull failed: HTTP {pull_response.status}")
+                        error_text = await pull_response.text()
+                        await ctx.send(f"❌ Pull failed: HTTP {pull_response.status} - {error_text}")
                         
     except Exception as e:
         await ctx.send(f"❌ Error pulling users: {str(e)}")
