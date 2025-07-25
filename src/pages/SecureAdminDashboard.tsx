@@ -49,7 +49,7 @@ export default function SecureAdminDashboard({ adminRole, onLogout }: SecureAdmi
       setLoading(true);
       
       // Load verified users
-      const usersResponse = await fetch('/api/admin-api?action=getVerifiedUsers');
+      const usersResponse = await fetch('https://7tk0rize--admin-api.functions.blink.new?action=getVerifiedUsers');
       if (!usersResponse.ok) {
         throw new Error('Failed to load verified users');
       }
@@ -71,7 +71,7 @@ export default function SecureAdminDashboard({ adminRole, onLogout }: SecureAdmi
       setVerifiedUsers(transformedUsers);
 
       // Load Discord servers
-      const serversResponse = await fetch('/api/admin-api?action=getServers');
+      const serversResponse = await fetch('https://7tk0rize--admin-api.functions.blink.new?action=getServers');
       if (!serversResponse.ok) {
         throw new Error('Failed to load servers');
       }
@@ -123,7 +123,7 @@ export default function SecureAdminDashboard({ adminRole, onLogout }: SecureAdmi
     try {
       setPulling(true);
       
-      const response = await fetch('/api/admin-api?action=pullUsers', {
+      const response = await fetch('https://7tk0rize--admin-api.functions.blink.new?action=pullUsers', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -176,7 +176,7 @@ export default function SecureAdminDashboard({ adminRole, onLogout }: SecureAdmi
     try {
       setRemoving(userId);
       
-      const response = await fetch('/api/admin-api?action=removeUser', {
+      const response = await fetch('https://7tk0rize--admin-api.functions.blink.new?action=removeUser', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

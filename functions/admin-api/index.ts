@@ -13,7 +13,7 @@ interface VerifiedUser {
   discriminator: string;
   avatar: string | null;
   access_token: string;
-  refresh_token?: string;
+  refresh_token: string;
   verified_at: string;
   server_id?: string;
   server_name?: string;
@@ -22,7 +22,7 @@ interface VerifiedUser {
 interface DiscordServer {
   id: string;
   name: string;
-  icon: string;
+  icon: string | null;
   memberCount: number;
   botPermissions: string[];
 }
@@ -42,235 +42,195 @@ serve(async (req) => {
   try {
     const url = new URL(req.url);
     const action = url.searchParams.get('action');
-    const botToken = Deno.env.get('DISCORD_BOT_TOKEN');
-    
-    if (!botToken) {
-      throw new Error('Discord bot token not configured');
-    }
 
-    switch (action) {
-      case 'getServers': {
-        // Get all servers the bot is in
-        const response = await fetch('https://discord.com/api/v10/users/@me/guilds', {
-          headers: {
-            'Authorization': `Bot ${botToken}`,
-            'Content-Type': 'application/json'
-          }
-        });
+    if (action === 'getVerifiedUsers') {
+      // Get verified users from database
+      const users = await blink.db.sql(`
+        SELECT * FROM verified_users 
+        ORDER BY verified_at DESC
+      `);
 
-        if (!response.ok) {
-          throw new Error(`Discord API error: ${response.status}`);
-        }
-
-        const guilds = await response.json();
-        
-        // Transform to our server format
-        const servers: DiscordServer[] = await Promise.all(
-          guilds.map(async (guild: any) => {
-            // Get bot member info to check permissions
-            const botMemberResponse = await fetch(
-              `https://discord.com/api/v10/guilds/${guild.id}/members/@me`,
-              {
-                headers: {
-                  'Authorization': `Bot ${botToken}`,
-                  'Content-Type': 'application/json'
-                }
-              }
-            );
-
-            const botPermissions: string[] = [];
-            if (botMemberResponse.ok) {
-              const botMember = await botMemberResponse.json();
-              // Get guild roles to calculate permissions
-              const rolesResponse = await fetch(
-                `https://discord.com/api/v10/guilds/${guild.id}/roles`,
-                {
-                  headers: {
-                    'Authorization': `Bot ${botToken}`,
-                    'Content-Type': 'application/json'
-                  }
-                }
-              );
-              
-              if (rolesResponse.ok) {
-                const roles = await rolesResponse.json();
-                const botRoles = roles.filter((role: any) => 
-                  botMember.roles.includes(role.id)
-                );
-                
-                // Calculate permissions (simplified)
-                const permissions = botRoles.reduce((acc: number, role: any) => 
-                  acc | parseInt(role.permissions), 0
-                );
-                
-                // Check for key permissions
-                if (permissions & 0x10000000) botPermissions.push('MANAGE_ROLES');
-                if (permissions & 0x800) botPermissions.push('SEND_MESSAGES');
-                if (permissions & 0x400) botPermissions.push('VIEW_CHANNELS');
-                if (permissions & 0x1) botPermissions.push('CREATE_INSTANT_INVITE');
-              }
-            }
-
-            return {
-              id: guild.id,
-              name: guild.name,
-              icon: guild.icon || '',
-              memberCount: guild.approximate_member_count || 0,
-              botPermissions
-            };
-          })
-        );
-
-        return new Response(JSON.stringify({ servers }), {
-          headers: {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
-          },
-        });
-      }
-
-      case 'getVerifiedUsers': {
-        // Get verified users from database using raw SQL
-        const result = await blink.db.sql(`
-          SELECT * FROM verified_users 
-          ORDER BY verified_at DESC
-        `);
-
-        // Transform the data to match expected format
-        const users = result.map((row: any) => ({
-          id: row.id,
-          user_id: row.user_id,
-          username: row.username,
-          discriminator: row.discriminator,
-          avatar: row.avatar,
-          access_token: row.access_token,
-          refresh_token: row.refresh_token,
-          verified_at: row.verified_at,
-          server_id: row.server_id,
-          server_name: row.server_name
-        }));
-
-        return new Response(JSON.stringify({ users }), {
-          headers: {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
-          },
-        });
-      }
-
-      case 'pullUsers': {
-        if (req.method !== 'POST') {
-          throw new Error('Method not allowed');
-        }
-
-        const { serverId, userIds } = await req.json();
-        
-        if (!serverId || !userIds || !Array.isArray(userIds)) {
-          throw new Error('Invalid request data');
-        }
-
-        const results = [];
-        const verifiedRoleId = Deno.env.get('DISCORD_VERIFIED_ROLE_ID');
-
-        for (const userId of userIds) {
-          try {
-            // Get user's access token from database using raw SQL
-            const userResult = await blink.db.sql(`
-              SELECT * FROM verified_users 
-              WHERE user_id = ? 
-              ORDER BY verified_at DESC 
-              LIMIT 1
-            `, [userId]);
-
-            if (userResult.length === 0) {
-              results.push({ userId, success: false, error: 'User not found in database' });
-              continue;
-            }
-
-            const user = userResult[0];
-
-            // Add user to server using their access token
-            const joinResponse = await fetch(
-              `https://discord.com/api/v10/guilds/${serverId}/members/${userId}`,
-              {
-                method: 'PUT',
-                headers: {
-                  'Authorization': `Bot ${botToken}`,
-                  'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                  access_token: user.access_token,
-                  roles: verifiedRoleId ? [verifiedRoleId] : []
-                })
-              }
-            );
-
-            if (joinResponse.ok || joinResponse.status === 204) {
-              results.push({ userId, success: true, error: null });
-            } else {
-              const errorData = await joinResponse.text();
-              results.push({ 
-                userId, 
-                success: false, 
-                error: `Discord API error: ${joinResponse.status} - ${errorData}` 
-              });
-            }
-          } catch (error) {
-            results.push({ 
-              userId, 
-              success: false, 
-              error: error.message 
-            });
-          }
-        }
-
-        return new Response(JSON.stringify({ results }), {
-          headers: {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
-          },
-        });
-      }
-
-      case 'removeUser': {
-        if (req.method !== 'POST') {
-          throw new Error('Method not allowed');
-        }
-
-        const { userId, adminRole } = await req.json();
-        
-        if (adminRole !== 'owner') {
-          throw new Error('Only owners can remove users');
-        }
-
-        // Remove user from database using raw SQL
-        await blink.db.sql(`
-          DELETE FROM verified_users 
-          WHERE user_id = ?
-        `, [userId]);
-
-        return new Response(JSON.stringify({ success: true }), {
-          headers: {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
-          },
-        });
-      }
-
-      default:
-        throw new Error('Invalid action');
-    }
-  } catch (error) {
-    console.error('Admin API error:', error);
-    return new Response(
-      JSON.stringify({ error: error.message }),
-      {
-        status: 500,
+      return new Response(JSON.stringify({
+        success: true,
+        users: users
+      }), {
         headers: {
           'Content-Type': 'application/json',
           'Access-Control-Allow-Origin': '*',
         },
+      });
+    }
+
+    if (action === 'getServers') {
+      // Get Discord servers the bot is in
+      const botToken = Deno.env.get('DISCORD_BOT_TOKEN');
+      
+      if (!botToken) {
+        throw new Error('Discord bot token not configured');
       }
-    );
+
+      // Get bot's guilds from Discord API
+      const response = await fetch('https://discord.com/api/v10/users/@me/guilds', {
+        headers: {
+          'Authorization': `Bot ${botToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Discord API error: ${response.status}`);
+      }
+
+      const guilds = await response.json();
+      
+      // Transform guild data to our server format
+      const servers: DiscordServer[] = guilds.map((guild: any) => ({
+        id: guild.id,
+        name: guild.name,
+        icon: guild.icon,
+        memberCount: guild.approximate_member_count || 0,
+        botPermissions: guild.permissions ? ['ADMINISTRATOR'] : ['BASIC']
+      }));
+
+      return new Response(JSON.stringify({
+        success: true,
+        servers: servers
+      }), {
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        },
+      });
+    }
+
+    if (action === 'pullUsers') {
+      const body = await req.json();
+      const { serverId, userIds } = body;
+      
+      const botToken = Deno.env.get('DISCORD_BOT_TOKEN');
+      const verifiedRoleId = Deno.env.get('DISCORD_VERIFIED_ROLE_ID');
+      
+      if (!botToken || !verifiedRoleId) {
+        throw new Error('Bot token or verified role ID not configured');
+      }
+
+      // Get verified users data
+      const users = await blink.db.sql(`
+        SELECT * FROM verified_users 
+        WHERE user_id IN (${userIds.map(() => '?').join(',')})
+      `, userIds);
+
+      const results = [];
+
+      for (const user of users) {
+        try {
+          // Create invite to add user to server
+          const inviteResponse = await fetch(`https://discord.com/api/v10/guilds/${serverId}/members/${user.user_id}`, {
+            method: 'PUT',
+            headers: {
+              'Authorization': `Bot ${botToken}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              access_token: user.access_token,
+              roles: [verifiedRoleId]
+            }),
+          });
+
+          if (inviteResponse.ok || inviteResponse.status === 204) {
+            results.push({
+              userId: user.user_id,
+              username: user.username,
+              success: true,
+              message: 'Successfully added to server'
+            });
+          } else {
+            const errorData = await inviteResponse.text();
+            results.push({
+              userId: user.user_id,
+              username: user.username,
+              success: false,
+              message: `Failed to add: ${errorData}`
+            });
+          }
+        } catch (error) {
+          results.push({
+            userId: user.user_id,
+            username: user.username,
+            success: false,
+            message: `Error: ${error.message}`
+          });
+        }
+      }
+
+      return new Response(JSON.stringify({
+        success: true,
+        results: results
+      }), {
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        },
+      });
+    }
+
+    if (action === 'removeUser') {
+      const body = await req.json();
+      const { userId, adminRole } = body;
+      
+      // Only owners can remove users
+      if (adminRole !== 'owner') {
+        return new Response(JSON.stringify({
+          success: false,
+          error: 'Only owners can remove users'
+        }), {
+          status: 403,
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+          },
+        });
+      }
+
+      // Remove user from database
+      await blink.db.sql(`
+        DELETE FROM verified_users 
+        WHERE user_id = ?
+      `, [userId]);
+
+      return new Response(JSON.stringify({
+        success: true,
+        message: 'User removed successfully'
+      }), {
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        },
+      });
+    }
+
+    return new Response(JSON.stringify({
+      success: false,
+      error: 'Invalid action'
+    }), {
+      status: 400,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      },
+    });
+
+  } catch (error) {
+    console.error('Admin API error:', error);
+    return new Response(JSON.stringify({
+      success: false,
+      error: error.message
+    }), {
+      status: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      },
+    });
   }
 });
