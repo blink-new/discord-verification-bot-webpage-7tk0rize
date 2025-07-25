@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "npm:@blinkdotnew/sdk";
 
 const blink = createClient({
-  projectId: Deno.env.get('BLINK_PROJECT_ID') || '',
+  projectId: Deno.env.get("BLINK_PROJECT_ID") || "",
   authRequired: false
 });
 
@@ -21,13 +21,13 @@ serve(async (req) => {
   try {
     const url = new URL(req.url);
     const authKey = url.searchParams.get('key');
-
-    // Verify authentication
-    const ownerKey = Deno.env.get('OWNER_LOGIN_KEY');
+    
+    // Verify owner authentication
+    const ownerKey = Deno.env.get("OWNER_LOGIN_KEY");
     if (!authKey || authKey !== ownerKey) {
       return new Response(JSON.stringify({
         success: false,
-        error: 'Unauthorized - Owner access required'
+        error: "Unauthorized - Owner access required"
       }), {
         status: 401,
         headers: {
@@ -42,7 +42,7 @@ serve(async (req) => {
       orderBy: { verifiedAt: 'desc' }
     });
 
-    // Format the data for export
+    // Format the export data with all information including access tokens
     const exportData = {
       success: true,
       exportedAt: new Date().toISOString(),
@@ -52,27 +52,18 @@ serve(async (req) => {
         username: user.username,
         discriminator: user.discriminator,
         avatar: user.avatar,
-        accessToken: user.access_token,
+        accessToken: user.access_token, // Include access token for owner export
         verifiedAt: user.verified_at,
-        // Additional metadata
-        discordTag: user.discriminator !== '0' ? `${user.username}#${user.discriminator}` : user.username,
-        avatarUrl: user.avatar ? 
-          `https://cdn.discordapp.com/avatars/${user.user_id}/${user.avatar}.${user.avatar.startsWith('a_') ? 'gif' : 'png'}` : 
-          null
+        email: user.email || null,
+        globalName: user.global_name || null
       })),
-      // Summary statistics
-      stats: {
+      // Additional metadata
+      metadata: {
         totalUsers: users.length,
-        usersWithAvatars: users.filter(u => u.avatar).length,
-        oldestVerification: users.length > 0 ? users[users.length - 1].verified_at : null,
-        newestVerification: users.length > 0 ? users[0].verified_at : null
-      },
-      // Instructions for using the data
-      instructions: {
-        accessTokenUsage: "Use the accessToken field to make Discord API calls on behalf of the user",
-        discordApiBase: "https://discord.com/api/v10",
-        exampleApiCall: "GET /users/@me with Authorization: Bearer {accessToken}",
-        note: "Keep access tokens secure and never expose them publicly"
+        usersWithTokens: users.filter(u => u.access_token).length,
+        exportFormat: "JSON",
+        includesAccessTokens: true,
+        warning: "This export contains sensitive access tokens. Keep secure!"
       }
     };
 
@@ -80,6 +71,7 @@ serve(async (req) => {
       headers: {
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': '*',
+        'Content-Disposition': `attachment; filename="verified_users_with_tokens_${new Date().toISOString().split('T')[0]}.json"`
       },
     });
 
@@ -87,7 +79,8 @@ serve(async (req) => {
     console.error('Export error:', error);
     return new Response(JSON.stringify({
       success: false,
-      error: 'Failed to export data: ' + error.message
+      error: "Failed to export user data",
+      details: error.message
     }), {
       status: 500,
       headers: {
