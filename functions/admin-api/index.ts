@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "npm:@blinkdotnew/sdk";
 
 const blink = createClient({
-  projectId: Deno.env.get('BLINK_PROJECT_ID') || '',
+  projectId: Deno.env.get('BLINK_PROJECT_ID') || 'discord-verification-bot-webpage-7tk0rize',
   authRequired: false
 });
 
@@ -15,16 +15,10 @@ interface VerifiedUser {
   access_token: string;
   refresh_token: string;
   verified_at: string;
-  server_id?: string;
-  server_name?: string;
-}
-
-interface DiscordServer {
-  id: string;
-  name: string;
-  icon: string | null;
-  memberCount: number;
-  botPermissions: string[];
+  server_id: string;
+  server_name: string;
+  created_at: string;
+  updated_at: string;
 }
 
 serve(async (req) => {
@@ -33,27 +27,16 @@ serve(async (req) => {
     return new Response(null, {
       headers: {
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type, Authorization',
       },
     });
   }
 
   try {
-    const url = new URL(req.url);
-    const action = url.searchParams.get('action');
-
-    if (action === 'getVerifiedUsers') {
-      // Get verified users from database
-      const users = await blink.db.sql(`
-        SELECT * FROM verified_users 
-        ORDER BY verified_at DESC
-      `);
-
-      return new Response(JSON.stringify({
-        success: true,
-        users: users
-      }), {
+    if (req.method !== 'POST') {
+      return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+        status: 405,
         headers: {
           'Content-Type': 'application/json',
           'Access-Control-Allow-Origin': '*',
@@ -61,130 +44,15 @@ serve(async (req) => {
       });
     }
 
-    if (action === 'getServers') {
-      // Get Discord servers the bot is in
-      const botToken = Deno.env.get('DISCORD_BOT_TOKEN');
-      
-      if (!botToken) {
-        throw new Error('Discord bot token not configured');
-      }
+    const { action, guildId, userRole } = await req.json();
 
-      // Get bot's guilds from Discord API
-      const response = await fetch('https://discord.com/api/v10/users/@me/guilds', {
-        headers: {
-          'Authorization': `Bot ${botToken}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error(`Discord API error: ${response.status}`);
-      }
-
-      const guilds = await response.json();
-      
-      // Transform guild data to our server format
-      const servers: DiscordServer[] = guilds.map((guild: any) => ({
-        id: guild.id,
-        name: guild.name,
-        icon: guild.icon,
-        memberCount: guild.approximate_member_count || 0,
-        botPermissions: guild.permissions ? ['ADMINISTRATOR'] : ['BASIC']
-      }));
-
-      return new Response(JSON.stringify({
-        success: true,
-        servers: servers
-      }), {
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-        },
-      });
-    }
-
-    if (action === 'pullUsers') {
-      const body = await req.json();
-      const { serverId, userIds } = body;
-      
-      const botToken = Deno.env.get('DISCORD_BOT_TOKEN');
-      const verifiedRoleId = Deno.env.get('DISCORD_VERIFIED_ROLE_ID');
-      
-      if (!botToken || !verifiedRoleId) {
-        throw new Error('Bot token or verified role ID not configured');
-      }
-
-      // Get verified users data
-      const users = await blink.db.sql(`
-        SELECT * FROM verified_users 
-        WHERE user_id IN (${userIds.map(() => '?').join(',')})
-      `, userIds);
-
-      const results = [];
-
-      for (const user of users) {
-        try {
-          // Create invite to add user to server
-          const inviteResponse = await fetch(`https://discord.com/api/v10/guilds/${serverId}/members/${user.user_id}`, {
-            method: 'PUT',
-            headers: {
-              'Authorization': `Bot ${botToken}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              access_token: user.access_token,
-              roles: [verifiedRoleId]
-            }),
-          });
-
-          if (inviteResponse.ok || inviteResponse.status === 204) {
-            results.push({
-              userId: user.user_id,
-              username: user.username,
-              success: true,
-              message: 'Successfully added to server'
-            });
-          } else {
-            const errorData = await inviteResponse.text();
-            results.push({
-              userId: user.user_id,
-              username: user.username,
-              success: false,
-              message: `Failed to add: ${errorData}`
-            });
-          }
-        } catch (error) {
-          results.push({
-            userId: user.user_id,
-            username: user.username,
-            success: false,
-            message: `Error: ${error.message}`
-          });
-        }
-      }
-
-      return new Response(JSON.stringify({
-        success: true,
-        results: results
-      }), {
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-        },
-      });
-    }
-
-    if (action === 'removeUser') {
-      const body = await req.json();
-      const { userId, adminRole } = body;
-      
-      // Only owners can remove users
-      if (adminRole !== 'owner') {
-        return new Response(JSON.stringify({
-          success: false,
-          error: 'Only owners can remove users'
+    if (action === 'pull_users') {
+      if (!guildId) {
+        return new Response(JSON.stringify({ 
+          success: false, 
+          error: 'Guild ID is required' 
         }), {
-          status: 403,
+          status: 400,
           headers: {
             'Content-Type': 'application/json',
             'Access-Control-Allow-Origin': '*',
@@ -192,15 +60,83 @@ serve(async (req) => {
         });
       }
 
-      // Remove user from database
-      await blink.db.sql(`
-        DELETE FROM verified_users 
-        WHERE user_id = ?
-      `, [userId]);
+      // Get all verified users
+      const verifiedUsers = await blink.db.verified_users.list() as VerifiedUser[];
+      
+      if (verifiedUsers.length === 0) {
+        return new Response(JSON.stringify({ 
+          success: false, 
+          error: 'No verified users found' 
+        }), {
+          status: 404,
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+          },
+        });
+      }
 
-      return new Response(JSON.stringify({
-        success: true,
-        message: 'User removed successfully'
+      // Get Discord bot token
+      const botToken = Deno.env.get('DISCORD_BOT_TOKEN');
+      if (!botToken) {
+        return new Response(JSON.stringify({ 
+          success: false, 
+          error: 'Discord bot token not configured' 
+        }), {
+          status: 500,
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+          },
+        });
+      }
+
+      let pulledCount = 0;
+      const errors: string[] = [];
+
+      // Try to add each verified user to the guild
+      for (const user of verifiedUsers) {
+        try {
+          // Use Discord API to add user to guild
+          const response = await fetch(`https://discord.com/api/v10/guilds/${guildId}/members/${user.user_id}`, {
+            method: 'PUT',
+            headers: {
+              'Authorization': `Bot ${botToken}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              access_token: user.access_token,
+              roles: [Deno.env.get('DISCORD_VERIFIED_ROLE_ID')].filter(Boolean), // Add verified role if configured
+            }),
+          });
+
+          if (response.ok || response.status === 204) {
+            pulledCount++;
+            console.log(`Successfully added user ${user.username} (${user.user_id}) to guild ${guildId}`);
+          } else {
+            const errorData = await response.text();
+            console.error(`Failed to add user ${user.username} (${user.user_id}):`, response.status, errorData);
+            
+            // Don't count common errors as failures
+            if (response.status !== 403 && response.status !== 400) {
+              errors.push(`${user.username}: ${response.status}`);
+            }
+          }
+        } catch (error) {
+          console.error(`Error adding user ${user.username} (${user.user_id}):`, error);
+          errors.push(`${user.username}: ${error.message}`);
+        }
+
+        // Small delay to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+
+      return new Response(JSON.stringify({ 
+        success: true, 
+        pulledCount,
+        totalUsers: verifiedUsers.length,
+        errors: errors.length > 0 ? errors : undefined,
+        message: `Successfully processed ${pulledCount}/${verifiedUsers.length} users`
       }), {
         headers: {
           'Content-Type': 'application/json',
@@ -209,10 +145,7 @@ serve(async (req) => {
       });
     }
 
-    return new Response(JSON.stringify({
-      success: false,
-      error: 'Invalid action'
-    }), {
+    return new Response(JSON.stringify({ error: 'Invalid action' }), {
       status: 400,
       headers: {
         'Content-Type': 'application/json',
@@ -222,9 +155,9 @@ serve(async (req) => {
 
   } catch (error) {
     console.error('Admin API error:', error);
-    return new Response(JSON.stringify({
-      success: false,
-      error: error.message
+    return new Response(JSON.stringify({ 
+      success: false, 
+      error: 'Internal server error' 
     }), {
       status: 500,
       headers: {
