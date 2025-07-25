@@ -57,32 +57,27 @@ export default function SecureAdminDashboard() {
   const loadData = async () => {
     setIsLoading(true)
     try {
-      // Simulate API calls for now - these would be real endpoints
-      const mockUsers: VerifiedUser[] = [
-        {
-          id: '123456789',
-          username: 'TestUser',
-          discriminator: '0001',
-          avatar: 'avatar_hash',
-          accessToken: 'token_123',
-          verifiedAt: new Date().toISOString()
-        }
-      ]
+      // Get verified users
+      const usersResponse = await fetch('https://7tk0rize--admin-api.functions.blink.new?action=getVerifiedUsers')
+      const usersData = await usersResponse.json()
       
-      const mockServers: DiscordServer[] = [
-        {
-          id: '987654321',
-          name: 'Test Server',
-          icon: '',
-          memberCount: 150,
-          botPermissions: ['MANAGE_ROLES', 'SEND_MESSAGES', 'VIEW_CHANNELS']
-        }
-      ]
+      if (usersData.error) {
+        throw new Error(usersData.error)
+      }
       
-      setVerifiedUsers(mockUsers)
-      setServers(mockServers)
+      // Get Discord servers
+      const serversResponse = await fetch('https://7tk0rize--admin-api.functions.blink.new?action=getServers')
+      const serversData = await serversResponse.json()
+      
+      if (serversData.error) {
+        throw new Error(serversData.error)
+      }
+      
+      setVerifiedUsers(usersData.users || [])
+      setServers(serversData.servers || [])
     } catch (error) {
-      toast.error('Failed to load admin data')
+      console.error('Failed to load admin data:', error)
+      toast.error('Failed to load admin data: ' + error.message)
     } finally {
       setIsLoading(false)
     }
@@ -131,12 +126,39 @@ export default function SecureAdminDashboard() {
 
     setActionLoading('pulling')
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 2000))
-      toast.success(`Successfully pulled ${selectedUsers.length} users to server`)
+      const response = await fetch('https://7tk0rize--admin-api.functions.blink.new?action=pullUsers', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          serverId: selectedServer,
+          userIds: selectedUsers
+        })
+      })
+
+      const data = await response.json()
+      
+      if (data.error) {
+        throw new Error(data.error)
+      }
+
+      const successCount = data.results.filter((r: any) => r.success).length
+      const failCount = data.results.filter((r: any) => !r.success).length
+
+      if (successCount > 0) {
+        toast.success(`Successfully pulled ${successCount} users to server`)
+      }
+      
+      if (failCount > 0) {
+        toast.error(`Failed to pull ${failCount} users. Check console for details.`)
+        console.error('Pull failures:', data.results.filter((r: any) => !r.success))
+      }
+
       setSelectedUsers([])
     } catch (error) {
-      toast.error('Error pulling users to server')
+      console.error('Error pulling users:', error)
+      toast.error('Error pulling users to server: ' + error.message)
     } finally {
       setActionLoading('')
     }
@@ -150,13 +172,29 @@ export default function SecureAdminDashboard() {
 
     setActionLoading('removing')
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      const response = await fetch('https://7tk0rize--admin-api.functions.blink.new?action=removeUser', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          userId: removeUserId,
+          adminRole: session.role
+        })
+      })
+
+      const data = await response.json()
+      
+      if (data.error) {
+        throw new Error(data.error)
+      }
+
       toast.success('User removed from verification database')
       setVerifiedUsers(prev => prev.filter(user => user.id !== removeUserId))
       setRemoveUserId('')
     } catch (error) {
-      toast.error('Error removing user')
+      console.error('Error removing user:', error)
+      toast.error('Error removing user: ' + error.message)
     } finally {
       setActionLoading('')
     }

@@ -74,12 +74,11 @@ serve(async (req) => {
 
     // Store verified user in database
     await blink.db.verifiedUsers.create({
-      id: `user_${userData.id}`,
+      id: userData.id,
       userId: userData.id,
       username: userData.username,
-      avatarUrl: userData.avatar 
-        ? `https://cdn.discordapp.com/avatars/${userData.id}/${userData.avatar}.png`
-        : null,
+      discriminator: userData.discriminator || '0000',
+      avatar: userData.avatar || '',
       accessToken: accessToken,
       verifiedAt: new Date().toISOString()
     });
