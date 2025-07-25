@@ -37,6 +37,42 @@ serve(async (req) => {
     const { action } = body;
 
     switch (action) {
+      case 'validate_login': {
+        const { loginKey } = body;
+        
+        if (loginKey === OWNER_LOGIN_KEY) {
+          return new Response(JSON.stringify({
+            success: true,
+            role: 'owner'
+          }), {
+            headers: {
+              'Content-Type': 'application/json',
+              'Access-Control-Allow-Origin': '*',
+            },
+          });
+        } else if (loginKey === ADMIN_LOGIN_KEY) {
+          return new Response(JSON.stringify({
+            success: true,
+            role: 'admin'
+          }), {
+            headers: {
+              'Content-Type': 'application/json',
+              'Access-Control-Allow-Origin': '*',
+            },
+          });
+        } else {
+          return new Response(JSON.stringify({
+            success: false,
+            role: null
+          }), {
+            headers: {
+              'Content-Type': 'application/json',
+              'Access-Control-Allow-Origin': '*',
+            },
+          });
+        }
+      }
+
       case 'authenticate': {
         const { loginKey } = body;
         

@@ -73,14 +73,29 @@ export default function AdminLogin() {
     }
   }, [])
 
-  const validateLoginKey = (key: string): 'owner' | 'admin' | null => {
-    // These would normally be fetched from environment variables
-    const ownerKey = 'Owner-A2fC-20AS-FAX2-MEL2-234'
-    const adminKey = 'Admin-A2F2-3SAC-3FSA-GVC2-994'
+  const validateLoginKey = async (key: string): Promise<'owner' | 'admin' | null> => {
+    try {
+      const response = await fetch('https://7tk0rize--admin-api.functions.blink.new', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'validate_login',
+          loginKey: key
+        })
+      })
 
-    if (key === ownerKey) return 'owner'
-    if (key === adminKey) return 'admin'
-    return null
+      if (!response.ok) {
+        throw new Error('Authentication failed')
+      }
+
+      const data = await response.json()
+      return data.role || null
+    } catch (error) {
+      console.error('Login validation error:', error)
+      return null
+    }
   }
 
   const handleLogin = async () => {
@@ -92,10 +107,8 @@ export default function AdminLogin() {
     setIsLoading(true)
     setError('')
 
-    // Simulate network delay for security
-    await new Promise(resolve => setTimeout(resolve, 1000))
-
-    const role = validateLoginKey(loginKey)
+    // Validate login key with backend
+    const role = await validateLoginKey(loginKey)
     
     if (role) {
       const newSession: AdminSession = {

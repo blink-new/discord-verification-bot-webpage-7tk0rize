@@ -68,7 +68,7 @@ export default function SecureAdminDashboard() {
     }
 
     try {
-      const response = await fetch('https://discord-verification-bot-webpage-7tk0rize-admin-api.blink-functions.com/', {
+      const response = await fetch('https://7tk0rize--admin-api.functions.blink.new', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'authenticate', loginKey })
@@ -113,7 +113,7 @@ export default function SecureAdminDashboard() {
 
     setIsLoading(true)
     try {
-      const response = await fetch('https://discord-verification-bot-webpage-7tk0rize-admin-api.blink-functions.com/', {
+      const response = await fetch('https://7tk0rize--admin-api.functions.blink.new', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
