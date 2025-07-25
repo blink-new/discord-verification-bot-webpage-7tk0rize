@@ -61,28 +61,13 @@ export default function SecureAdminDashboard() {
   const loadData = async () => {
     setIsLoading(true)
     try {
-      // Load verified users
-      const usersResponse = await fetch('https://7tk0rize--admin-api.functions.blink.new', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'getVerifiedUsers' })
-      })
-      const usersData = await usersResponse.json()
+      // Load admin dashboard data
+      const dashboardResponse = await fetch('https://7tk0rize--admin-api.functions.blink.new/admin/dashboard')
+      const dashboardData = await dashboardResponse.json()
       
-      if (usersData.success) {
-        setVerifiedUsers(usersData.users || [])
-      }
-
-      // Load stats
-      const statsResponse = await fetch('https://7tk0rize--admin-api.functions.blink.new', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'getStats' })
-      })
-      const statsData = await statsResponse.json()
-      
-      if (statsData.success) {
-        setStats(statsData.stats)
+      if (dashboardData.stats && dashboardData.users) {
+        setStats(dashboardData.stats)
+        setVerifiedUsers(dashboardData.users)
       }
 
       // Load bot servers (mock data for now)
@@ -161,24 +146,19 @@ export default function SecureAdminDashboard() {
     }
 
     try {
-      const selectedUserData = verifiedUsers.filter(user => 
-        selectedUsers.includes(user.userId)
-      )
-
-      const response = await fetch('https://7tk0rize--admin-api.functions.blink.new', {
+      const response = await fetch('https://7tk0rize--admin-api.functions.blink.new/admin/pull', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          action: 'pullUsers',
           guildId: targetGuildId,
-          verifiedUsers: selectedUserData
+          selectedUsers: selectedUsers
         })
       })
 
       const data = await response.json()
 
       if (data.success) {
-        toast.success(`Successfully processed ${data.addedCount} users`)
+        toast.success(`Successfully initiated pull for ${data.users.length} users to guild ${data.guildId}`)
         setSelectedUsers([])
         setTargetGuildId('')
       } else {
@@ -197,11 +177,24 @@ export default function SecureAdminDashboard() {
     }
 
     try {
-      // This would call an API to remove the user
-      // For now, we'll just remove from local state
-      setVerifiedUsers(prev => prev.filter(user => user.userId !== userId))
-      toast.success('User removed successfully')
+      const response = await fetch(`https://7tk0rize--admin-api.functions.blink.new/admin/users/${userId}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `OWNER-${session.timestamp}`
+        }
+      })
+
+      const data = await response.json()
+
+      if (data.success) {
+        setVerifiedUsers(prev => prev.filter(user => user.userId !== userId))
+        toast.success('User removed successfully')
+      } else {
+        toast.error(data.error || 'Failed to remove user')
+      }
     } catch (error) {
+      console.error('Error removing user:', error)
       toast.error('Failed to remove user')
     }
   }

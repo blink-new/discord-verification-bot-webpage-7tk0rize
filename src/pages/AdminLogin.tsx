@@ -75,13 +75,12 @@ export default function AdminLogin() {
 
   const validateLoginKey = async (key: string): Promise<'owner' | 'admin' | null> => {
     try {
-      const response = await fetch('https://7tk0rize--admin-api.functions.blink.new', {
+      const response = await fetch('https://7tk0rize--admin-api.functions.blink.new/admin/auth', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          action: 'validate_login',
           loginKey: key
         })
       })
@@ -91,7 +90,7 @@ export default function AdminLogin() {
       }
 
       const data = await response.json()
-      return data.role || null
+      return data.success ? data.role.toLowerCase() : null
     } catch (error) {
       console.error('Login validation error:', error)
       return null
