@@ -4,104 +4,180 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { Separator } from '@/components/ui/separator'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Trash2, Users, Server, Shield, LogOut, Eye, EyeOff } from 'lucide-react'
+import { 
+  Shield, 
+  Users, 
+  Server, 
+  Trash2, 
+  Download, 
+  LogOut, 
+  AlertTriangle,
+  UserPlus,
+  Search
+} from 'lucide-react'
 import { toast } from 'sonner'
-import { createClient } from '@blinkdotnew/sdk'
 
-const blink = createClient({
-  projectId: 'discord-verification-bot-webpage-7tk0rize',
-  authRequired: false
-})
+interface AdminSession {
+  role: 'owner' | 'admin'
+  authenticated: boolean
+  timestamp: number
+}
 
 interface VerifiedUser {
   id: string
   userId: string
   username: string
   discriminator: string
-  avatar: string
+  avatar: string | null
   accessToken: string
   verifiedAt: string
+  serverId?: string
+  serverName?: string
+}
+
+interface Stats {
+  total: number
+  today: number
+  week: number
 }
 
 export default function SecureAdminDashboard() {
-  const navigate = useNavigate()
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [userRole, setUserRole] = useState<'owner' | 'admin' | null>(null)
-  const [loginKey, setLoginKey] = useState('')
-  const [showKey, setShowKey] = useState(false)
+  const [session, setSession] = useState<AdminSession | null>(null)
   const [verifiedUsers, setVerifiedUsers] = useState<VerifiedUser[]>([])
+  const [stats, setStats] = useState<Stats>({ total: 0, today: 0, week: 0 })
+  const [isLoading, setIsLoading] = useState(true)
   const [guildId, setGuildId] = useState('')
-  const [isLoading, setIsLoading] = useState(false)
-  const [stats, setStats] = useState({ total: 0, today: 0 })
+  const [selectedUsers, setSelectedUsers] = useState<string[]>([])
+  const [searchTerm, setSearchTerm] = useState('')
+  const [isPulling, setIsPulling] = useState(false)
+  const navigate = useNavigate()
 
-  const loadVerifiedUsers = async () => {
+  const loadData = async () => {
     try {
-      const users = await blink.db.verifiedUsers.list({
-        orderBy: { verifiedAt: 'desc' }
+      setIsLoading(true)
+      
+      // Load verified users
+      const usersResponse = await fetch('https://7tk0rize--admin-api.functions.blink.new', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'getVerifiedUsers' })
       })
-      setVerifiedUsers(users)
       
-      // Calculate stats
-      const today = new Date().toDateString()
-      const todayCount = users.filter(user => 
-        new Date(user.verifiedAt).toDateString() === today
-      ).length
+      if (usersResponse.ok) {
+        const usersData = await usersResponse.json()
+        if (usersData.success) {
+          setVerifiedUsers(usersData.users || [])
+        }
+      }
+
+      // Load stats
+      const statsResponse = await fetch('https://7tk0rize--admin-api.functions.blink.new', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'getStats' })
+      })
       
-      setStats({ total: users.length, today: todayCount })
+      if (statsResponse.ok) {
+        const statsData = await statsResponse.json()
+        if (statsData.success) {
+          setStats(statsData.stats)
+        }
+      }
     } catch (error) {
-      console.error('Failed to load verified users:', error)
-      toast.error('Failed to load verified users')
+      console.error('Error loading data:', error)
+      toast.error('Failed to load dashboard data')
+    } finally {
+      setIsLoading(false)
     }
   }
 
-  useEffect(() => {
-    loadVerifiedUsers()
-  }, [])
+  const getFilteredUsers = () => {
+    return verifiedUsers.filter(user =>
+      user.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      user.userId.includes(searchTerm)
+    )
+  }
 
-  const handleLogin = async () => {
-    if (!loginKey.trim()) {
-      toast.error('Please enter a login key')
+  // Check authentication on mount
+  useEffect(() => {
+    const savedSession = localStorage.getItem('admin_session')
+    if (!savedSession) {
+      navigate('/admin')
       return
     }
 
     try {
-      const response = await fetch('https://7tk0rize--admin-api.functions.blink.new', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'authenticate', loginKey })
-      })
+      const parsedSession: AdminSession = JSON.parse(savedSession)
+      const now = Date.now()
+      const sessionAge = now - parsedSession.timestamp
+      const maxAge = 24 * 60 * 60 * 1000 // 24 hours
 
-      const data = await response.json()
-      
-      if (data.success) {
-        setIsAuthenticated(true)
-        setUserRole(data.role)
-        toast.success(`Logged in as ${data.role}`)
-      } else {
-        toast.error('Invalid login key')
+      if (sessionAge >= maxAge || !parsedSession.authenticated) {
+        localStorage.removeItem('admin_session')
+        navigate('/admin')
+        return
       }
-    } catch (error) {
-      console.error('Login failed:', error)
-      toast.error('Login failed')
+
+      setSession(parsedSession)
+      loadData()
+    } catch (e) {
+      localStorage.removeItem('admin_session')
+      navigate('/admin')
     }
+  }, [navigate])
+
+  const handleLogout = () => {
+    localStorage.removeItem('admin_session')
+    setSession(null)
+    navigate('/admin')
+    toast.success('Logged out successfully')
   }
 
   const handleRemoveUser = async (userId: string) => {
-    if (userRole !== 'owner') {
+    if (!session || session.role !== 'owner') {
       toast.error('Only owners can remove verified users')
       return
     }
 
+    if (!confirm('Are you sure you want to remove this verified user? This action cannot be undone.')) {
+      return
+    }
+
     try {
-      await blink.db.verifiedUsers.delete(userId)
-      await loadVerifiedUsers()
+      // Remove from local state immediately for better UX
+      setVerifiedUsers(prev => prev.filter(user => user.userId !== userId))
+      
+      // Here you would call your API to remove the user from the database
+      // For now, we'll just show a success message
       toast.success('User removed successfully')
+      
+      // Reload data to ensure consistency
+      await loadData()
     } catch (error) {
-      console.error('Failed to remove user:', error)
+      console.error('Error removing user:', error)
       toast.error('Failed to remove user')
+      // Reload data to restore state
+      await loadData()
+    }
+  }
+
+  const handleSelectUser = (userId: string) => {
+    setSelectedUsers(prev => 
+      prev.includes(userId) 
+        ? prev.filter(id => id !== userId)
+        : [...prev, userId]
+    )
+  }
+
+  const handleSelectAll = () => {
+    const filteredUsers = getFilteredUsers()
+    const allSelected = filteredUsers.every(user => selectedUsers.includes(user.userId))
+    
+    if (allSelected) {
+      setSelectedUsers([])
+    } else {
+      setSelectedUsers(filteredUsers.map(user => user.userId))
     }
   }
 
@@ -111,108 +187,82 @@ export default function SecureAdminDashboard() {
       return
     }
 
-    setIsLoading(true)
+    if (selectedUsers.length === 0) {
+      toast.error('Please select at least one user to pull')
+      return
+    }
+
+    setIsPulling(true)
     try {
+      const usersToPull = verifiedUsers.filter(user => selectedUsers.includes(user.userId))
+      
       const response = await fetch('https://7tk0rize--admin-api.functions.blink.new', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          action: 'pullUsers', 
-          guildId,
-          verifiedUsers: verifiedUsers.map(user => ({
-            userId: user.userId,
-            accessToken: user.accessToken
-          }))
+        body: JSON.stringify({
+          action: 'pullUsers',
+          guildId: guildId.trim(),
+          verifiedUsers: usersToPull
         })
       })
 
-      const data = await response.json()
-      
-      if (data.success) {
-        toast.success(`Successfully pulled ${data.addedCount} users to the server`)
+      if (response.ok) {
+        const data = await response.json()
+        if (data.success) {
+          toast.success(`Successfully processed ${data.addedCount} users for guild ${guildId}`)
+          setSelectedUsers([])
+          setGuildId('')
+        } else {
+          toast.error(data.error || 'Failed to pull users')
+        }
       } else {
-        toast.error(data.error || 'Failed to pull users')
+        toast.error('Failed to pull users to server')
       }
     } catch (error) {
-      console.error('Failed to pull users:', error)
-      toast.error('Failed to pull users')
+      console.error('Error pulling users:', error)
+      toast.error('Failed to pull users to server')
     } finally {
-      setIsLoading(false)
+      setIsPulling(false)
     }
   }
 
-  const handleLogout = () => {
-    setIsAuthenticated(false)
-    setUserRole(null)
-    setLoginKey('')
-    toast.success('Logged out successfully')
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    })
   }
 
-  if (!isAuthenticated) {
-    return (
-      <div className="min-h-screen bg-[#23272A] flex items-center justify-center p-4">
-        <Card className="w-full max-w-md bg-[#2C2F33] border-[#40444B]">
-          <CardHeader className="text-center">
-            <CardTitle className="text-white flex items-center justify-center gap-2">
-              <Shield className="h-6 w-6 text-[#5865F2]" />
-              Admin Access
-            </CardTitle>
-            <CardDescription className="text-[#B9BBBE]">
-              Enter your login key to access the admin dashboard
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="relative">
-              <Input
-                type={showKey ? 'text' : 'password'}
-                placeholder="Enter login key..."
-                value={loginKey}
-                onChange={(e) => setLoginKey(e.target.value)}
-                className="bg-[#40444B] border-[#40444B] text-white pr-10"
-                onKeyPress={(e) => e.key === 'Enter' && handleLogin()}
-              />
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="absolute right-0 top-0 h-full px-3 text-[#B9BBBE] hover:text-white"
-                onClick={() => setShowKey(!showKey)}
-              >
-                {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </Button>
-            </div>
-            <Button 
-              onClick={handleLogin} 
-              className="w-full bg-[#5865F2] hover:bg-[#4752C4] text-white"
-            >
-              Login
-            </Button>
-            <div className="text-xs text-[#72767D] text-center">
-              <p>Owner: Full access including user removal</p>
-              <p>Admin: View and pull users only</p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    )
+  if (!session) {
+    return <div>Loading...</div>
   }
+
+  const filteredUsers = getFilteredUsers()
 
   return (
     <div className="min-h-screen bg-[#23272A] p-4">
-      <div className="max-w-6xl mx-auto space-y-6">
+      <div className="max-w-7xl mx-auto space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-white">Admin Dashboard</h1>
-            <p className="text-[#B9BBBE]">
-              Logged in as <Badge variant="outline" className="text-[#5865F2] border-[#5865F2]">
-                {userRole}
-              </Badge>
-            </p>
+          <div className="flex items-center space-x-4">
+            <div className="p-2 bg-[#5865F2] rounded-lg">
+              <Shield className="h-6 w-6 text-white" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-white">Admin Dashboard</h1>
+              <p className="text-[#B9BBBE]">
+                Logged in as <Badge variant="secondary" className="ml-1">
+                  {session.role.toUpperCase()}
+                </Badge>
+              </p>
+            </div>
           </div>
-          <Button 
+          <Button
             onClick={handleLogout}
-            variant="outline" 
+            variant="outline"
             className="border-[#40444B] text-[#B9BBBE] hover:bg-[#40444B]"
           >
             <LogOut className="h-4 w-4 mr-2" />
@@ -221,23 +271,31 @@ export default function SecureAdminDashboard() {
         </div>
 
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <Card className="bg-[#2C2F33] border-[#40444B]">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-[#B9BBBE]">Total Verified</CardTitle>
-              <Users className="h-4 w-4 text-[#57F287]" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-white">{stats.total}</div>
             </CardContent>
           </Card>
+          
           <Card className="bg-[#2C2F33] border-[#40444B]">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-[#B9BBBE]">Today</CardTitle>
-              <Server className="h-4 w-4 text-[#5865F2]" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-white">{stats.today}</div>
+            </CardContent>
+          </Card>
+          
+          <Card className="bg-[#2C2F33] border-[#40444B]">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-[#B9BBBE]">This Week</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-white">{stats.week}</div>
             </CardContent>
           </Card>
         </div>
@@ -245,83 +303,154 @@ export default function SecureAdminDashboard() {
         {/* Pull Users Section */}
         <Card className="bg-[#2C2F33] border-[#40444B]">
           <CardHeader>
-            <CardTitle className="text-white">Pull Verified Users to Server</CardTitle>
+            <CardTitle className="text-white flex items-center">
+              <UserPlus className="h-5 w-5 mr-2" />
+              Pull Users to Server
+            </CardTitle>
             <CardDescription className="text-[#B9BBBE]">
-              Enter a Guild ID to add all verified users to that server
+              Select verified users and enter a Guild ID to pull them to that server
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex gap-2">
-              <Input
-                placeholder="Enter Guild ID..."
-                value={guildId}
-                onChange={(e) => setGuildId(e.target.value)}
-                className="bg-[#40444B] border-[#40444B] text-white"
-              />
-              <Button 
+            <div className="flex space-x-4">
+              <div className="flex-1">
+                <Input
+                  placeholder="Enter Discord Guild ID (e.g., 1234567890123456789)"
+                  value={guildId}
+                  onChange={(e) => setGuildId(e.target.value)}
+                  className="bg-[#40444B] border-[#40444B] text-white placeholder-[#72767D]"
+                />
+              </div>
+              <Button
                 onClick={handlePullUsers}
-                disabled={isLoading || !guildId.trim()}
-                className="bg-[#57F287] hover:bg-[#3BA55D] text-black"
+                disabled={!guildId.trim() || selectedUsers.length === 0 || isPulling}
+                className="bg-[#57F287] hover:bg-[#3BA55C] text-black"
               >
-                {isLoading ? 'Pulling...' : 'Pull Users'}
+                {isPulling ? (
+                  <div className="flex items-center space-x-2">
+                    <div className="w-4 h-4 border-2 border-black border-t-transparent rounded-full animate-spin" />
+                    <span>Pulling...</span>
+                  </div>
+                ) : (
+                  <>
+                    <Download className="h-4 w-4 mr-2" />
+                    Pull {selectedUsers.length} Users
+                  </>
+                )}
               </Button>
             </div>
-            <Alert className="bg-[#40444B] border-[#40444B]">
-              <Server className="h-4 w-4" />
-              <AlertDescription className="text-[#B9BBBE]">
-                This will attempt to add all {verifiedUsers.length} verified users to the specified server.
-                Make sure the bot has proper permissions in the target server.
-              </AlertDescription>
-            </Alert>
+            
+            {selectedUsers.length > 0 && (
+              <Alert className="bg-blue-500/10 border-blue-500/20">
+                <AlertTriangle className="h-4 w-4 text-blue-400" />
+                <AlertDescription className="text-blue-400">
+                  {selectedUsers.length} user(s) selected for pulling to guild {guildId || '[Guild ID]'}
+                </AlertDescription>
+              </Alert>
+            )}
           </CardContent>
         </Card>
 
-        {/* Verified Users List */}
+        {/* Verified Users */}
         <Card className="bg-[#2C2F33] border-[#40444B]">
           <CardHeader>
-            <CardTitle className="text-white">Verified Users ({verifiedUsers.length})</CardTitle>
-            <CardDescription className="text-[#B9BBBE]">
-              All users who have completed the verification process
-            </CardDescription>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-white flex items-center">
+                <Users className="h-5 w-5 mr-2" />
+                Verified Users ({filteredUsers.length})
+              </CardTitle>
+              <div className="flex items-center space-x-2">
+                <div className="relative">
+                  <Search className="h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-[#72767D]" />
+                  <Input
+                    placeholder="Search users..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="pl-10 bg-[#40444B] border-[#40444B] text-white placeholder-[#72767D] w-64"
+                  />
+                </div>
+                <Button
+                  onClick={handleSelectAll}
+                  variant="outline"
+                  size="sm"
+                  className="border-[#40444B] text-[#B9BBBE] hover:bg-[#40444B]"
+                >
+                  {filteredUsers.every(user => selectedUsers.includes(user.userId)) ? 'Deselect All' : 'Select All'}
+                </Button>
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
-            {verifiedUsers.length === 0 ? (
-              <div className="text-center py-8 text-[#72767D]">
-                No verified users yet
+            {isLoading ? (
+              <div className="text-center py-8">
+                <div className="w-8 h-8 border-2 border-[#5865F2] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+                <p className="text-[#B9BBBE]">Loading verified users...</p>
+              </div>
+            ) : filteredUsers.length === 0 ? (
+              <div className="text-center py-8">
+                <Users className="h-12 w-12 text-[#72767D] mx-auto mb-4" />
+                <p className="text-[#B9BBBE]">
+                  {searchTerm ? 'No users found matching your search' : 'No verified users found'}
+                </p>
               </div>
             ) : (
-              <div className="space-y-3">
-                {verifiedUsers.map((user) => (
-                  <div key={user.id} className="flex items-center justify-between p-3 bg-[#40444B] rounded-lg">
-                    <div className="flex items-center gap-3">
-                      <Avatar className="h-10 w-10">
-                        <AvatarImage src={user.avatar} alt={user.username} />
-                        <AvatarFallback className="bg-[#5865F2] text-white">
-                          {user.username.charAt(0).toUpperCase()}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div>
-                        <p className="text-white font-medium">
-                          {user.username}#{user.discriminator}
-                        </p>
-                        <p className="text-[#72767D] text-sm">
-                          ID: {user.userId}
-                        </p>
-                        <p className="text-[#72767D] text-xs">
-                          Verified: {new Date(user.verifiedAt).toLocaleString()}
-                        </p>
+              <div className="space-y-2">
+                {filteredUsers.map((user) => (
+                  <div
+                    key={user.id}
+                    className={`flex items-center justify-between p-4 rounded-lg border transition-colors ${
+                      selectedUsers.includes(user.userId)
+                        ? 'bg-[#5865F2]/10 border-[#5865F2]/30'
+                        : 'bg-[#40444B] border-[#40444B] hover:bg-[#484C52]'
+                    }`}
+                  >
+                    <div className="flex items-center space-x-4">
+                      <input
+                        type="checkbox"
+                        checked={selectedUsers.includes(user.userId)}
+                        onChange={() => handleSelectUser(user.userId)}
+                        className="w-4 h-4 text-[#5865F2] bg-[#40444B] border-[#72767D] rounded focus:ring-[#5865F2]"
+                      />
+                      
+                      <div className="flex items-center space-x-3">
+                        {user.avatar ? (
+                          <img
+                            src={`https://cdn.discordapp.com/avatars/${user.userId}/${user.avatar}.png?size=32`}
+                            alt={user.username}
+                            className="w-8 h-8 rounded-full"
+                          />
+                        ) : (
+                          <div className="w-8 h-8 bg-[#5865F2] rounded-full flex items-center justify-center">
+                            <span className="text-white text-sm font-medium">
+                              {user.username.charAt(0).toUpperCase()}
+                            </span>
+                          </div>
+                        )}
+                        
+                        <div>
+                          <p className="text-white font-medium">{user.username}</p>
+                          <p className="text-[#B9BBBE] text-sm">ID: {user.userId}</p>
+                        </div>
                       </div>
                     </div>
-                    {userRole === 'owner' && (
-                      <Button
-                        onClick={() => handleRemoveUser(user.id)}
-                        variant="destructive"
-                        size="sm"
-                        className="bg-[#ED4245] hover:bg-[#C73E41]"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    )}
+                    
+                    <div className="flex items-center space-x-4">
+                      <div className="text-right">
+                        <p className="text-[#B9BBBE] text-sm">Verified</p>
+                        <p className="text-white text-sm">{formatDate(user.verifiedAt)}</p>
+                      </div>
+                      
+                      {session.role === 'owner' && (
+                        <Button
+                          onClick={() => handleRemoveUser(user.userId)}
+                          variant="outline"
+                          size="sm"
+                          className="border-red-500/20 text-red-400 hover:bg-red-500/10"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>

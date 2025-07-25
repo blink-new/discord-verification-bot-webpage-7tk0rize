@@ -271,6 +271,35 @@ serve(async (req) => {
         }
       }
 
+      case 'stats': {
+        // Simple stats endpoint for the Discord bot
+        try {
+          const users = await blink.db.verifiedUsers.list();
+          
+          return new Response(JSON.stringify({
+            success: true,
+            total: users.length,
+            users: users.length
+          }), {
+            headers: {
+              'Content-Type': 'application/json',
+              'Access-Control-Allow-Origin': '*',
+            },
+          });
+        } catch (error) {
+          console.error('Error fetching stats:', error);
+          return new Response(JSON.stringify({
+            success: false,
+            error: 'Failed to fetch stats'
+          }), {
+            headers: {
+              'Content-Type': 'application/json',
+              'Access-Control-Allow-Origin': '*',
+            },
+          });
+        }
+      }
+
       default:
         return new Response(JSON.stringify({
           success: false,
