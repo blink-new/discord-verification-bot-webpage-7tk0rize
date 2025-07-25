@@ -38,8 +38,8 @@ serve(async (req) => {
     }
 
     // Get all verified users with access tokens
-    const users = await blink.db.verifiedUsers.list({
-      orderBy: { verifiedAt: 'desc' }
+    const users = await blink.db.verified_users.list({
+      orderBy: { created_at: 'desc' }
     });
 
     // Format the export data with all information including access tokens
@@ -53,7 +53,7 @@ serve(async (req) => {
         discriminator: user.discriminator,
         avatar: user.avatar,
         accessToken: user.access_token, // Include access token for owner export
-        verifiedAt: user.verified_at,
+        verifiedAt: user.created_at,
         email: user.email || null,
         globalName: user.global_name || null
       })),
