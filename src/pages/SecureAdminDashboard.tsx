@@ -9,12 +9,13 @@ import {
   Shield, 
   Users, 
   Server, 
+  UserPlus, 
   Trash2, 
-  Download, 
   LogOut, 
+  RefreshCw,
   AlertTriangle,
-  UserPlus,
-  Search
+  CheckCircle,
+  XCircle
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -28,12 +29,17 @@ interface VerifiedUser {
   id: string
   userId: string
   username: string
-  discriminator: string
-  avatar: string | null
+  discriminator?: string
+  avatar?: string
   accessToken: string
   verifiedAt: string
-  serverId?: string
-  serverName?: string
+}
+
+interface BotServer {
+  id: string
+  name: string
+  memberCount: number
+  isConnected: boolean
 }
 
 interface Stats {
@@ -45,30 +51,26 @@ interface Stats {
 export default function SecureAdminDashboard() {
   const [session, setSession] = useState<AdminSession | null>(null)
   const [verifiedUsers, setVerifiedUsers] = useState<VerifiedUser[]>([])
+  const [botServers, setBotServers] = useState<BotServer[]>([])
   const [stats, setStats] = useState<Stats>({ total: 0, today: 0, week: 0 })
   const [isLoading, setIsLoading] = useState(true)
-  const [guildId, setGuildId] = useState('')
   const [selectedUsers, setSelectedUsers] = useState<string[]>([])
-  const [searchTerm, setSearchTerm] = useState('')
-  const [isPulling, setIsPulling] = useState(false)
+  const [targetGuildId, setTargetGuildId] = useState('')
   const navigate = useNavigate()
 
   const loadData = async () => {
+    setIsLoading(true)
     try {
-      setIsLoading(true)
-      
       // Load verified users
       const usersResponse = await fetch('https://7tk0rize--admin-api.functions.blink.new', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'getVerifiedUsers' })
       })
+      const usersData = await usersResponse.json()
       
-      if (usersResponse.ok) {
-        const usersData = await usersResponse.json()
-        if (usersData.success) {
-          setVerifiedUsers(usersData.users || [])
-        }
+      if (usersData.success) {
+        setVerifiedUsers(usersData.users || [])
       }
 
       // Load stats
@@ -77,33 +79,31 @@ export default function SecureAdminDashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'getStats' })
       })
+      const statsData = await statsResponse.json()
       
-      if (statsResponse.ok) {
-        const statsData = await statsResponse.json()
-        if (statsData.success) {
-          setStats(statsData.stats)
-        }
+      if (statsData.success) {
+        setStats(statsData.stats)
       }
+
+      // Load bot servers (mock data for now)
+      setBotServers([
+        { id: '123456789', name: 'Main Server', memberCount: 1250, isConnected: true },
+        { id: '987654321', name: 'Community Hub', memberCount: 850, isConnected: true },
+        { id: '456789123', name: 'Gaming Zone', memberCount: 2100, isConnected: false }
+      ])
     } catch (error) {
       console.error('Error loading data:', error)
-      toast.error('Failed to load dashboard data')
+      toast.error('Failed to load admin data')
     } finally {
       setIsLoading(false)
     }
-  }
-
-  const getFilteredUsers = () => {
-    return verifiedUsers.filter(user =>
-      user.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      user.userId.includes(searchTerm)
-    )
   }
 
   // Check authentication on mount
   useEffect(() => {
     const savedSession = localStorage.getItem('admin_session')
     if (!savedSession) {
-      navigate('/admin')
+      navigate('/admin/login')
       return
     }
 
@@ -115,7 +115,7 @@ export default function SecureAdminDashboard() {
 
       if (sessionAge >= maxAge || !parsedSession.authenticated) {
         localStorage.removeItem('admin_session')
-        navigate('/admin')
+        navigate('/admin/login')
         return
       }
 
@@ -123,46 +123,17 @@ export default function SecureAdminDashboard() {
       loadData()
     } catch (e) {
       localStorage.removeItem('admin_session')
-      navigate('/admin')
+      navigate('/admin/login')
     }
   }, [navigate])
 
   const handleLogout = () => {
     localStorage.removeItem('admin_session')
-    setSession(null)
-    navigate('/admin')
     toast.success('Logged out successfully')
+    navigate('/admin/login')
   }
 
-  const handleRemoveUser = async (userId: string) => {
-    if (!session || session.role !== 'owner') {
-      toast.error('Only owners can remove verified users')
-      return
-    }
-
-    if (!confirm('Are you sure you want to remove this verified user? This action cannot be undone.')) {
-      return
-    }
-
-    try {
-      // Remove from local state immediately for better UX
-      setVerifiedUsers(prev => prev.filter(user => user.userId !== userId))
-      
-      // Here you would call your API to remove the user from the database
-      // For now, we'll just show a success message
-      toast.success('User removed successfully')
-      
-      // Reload data to ensure consistency
-      await loadData()
-    } catch (error) {
-      console.error('Error removing user:', error)
-      toast.error('Failed to remove user')
-      // Reload data to restore state
-      await loadData()
-    }
-  }
-
-  const handleSelectUser = (userId: string) => {
+  const handleUserSelect = (userId: string) => {
     setSelectedUsers(prev => 
       prev.includes(userId) 
         ? prev.filter(id => id !== userId)
@@ -171,103 +142,105 @@ export default function SecureAdminDashboard() {
   }
 
   const handleSelectAll = () => {
-    const filteredUsers = getFilteredUsers()
-    const allSelected = filteredUsers.every(user => selectedUsers.includes(user.userId))
-    
-    if (allSelected) {
+    if (selectedUsers.length === verifiedUsers.length) {
       setSelectedUsers([])
     } else {
-      setSelectedUsers(filteredUsers.map(user => user.userId))
+      setSelectedUsers(verifiedUsers.map(user => user.userId))
     }
   }
 
   const handlePullUsers = async () => {
-    if (!guildId.trim()) {
+    if (!targetGuildId.trim()) {
       toast.error('Please enter a Guild ID')
       return
     }
 
     if (selectedUsers.length === 0) {
-      toast.error('Please select at least one user to pull')
+      toast.error('Please select users to pull')
       return
     }
 
-    setIsPulling(true)
     try {
-      const usersToPull = verifiedUsers.filter(user => selectedUsers.includes(user.userId))
-      
+      const selectedUserData = verifiedUsers.filter(user => 
+        selectedUsers.includes(user.userId)
+      )
+
       const response = await fetch('https://7tk0rize--admin-api.functions.blink.new', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'pullUsers',
-          guildId: guildId.trim(),
-          verifiedUsers: usersToPull
+          guildId: targetGuildId,
+          verifiedUsers: selectedUserData
         })
       })
 
-      if (response.ok) {
-        const data = await response.json()
-        if (data.success) {
-          toast.success(`Successfully processed ${data.addedCount} users for guild ${guildId}`)
-          setSelectedUsers([])
-          setGuildId('')
-        } else {
-          toast.error(data.error || 'Failed to pull users')
-        }
+      const data = await response.json()
+
+      if (data.success) {
+        toast.success(`Successfully processed ${data.addedCount} users`)
+        setSelectedUsers([])
+        setTargetGuildId('')
       } else {
-        toast.error('Failed to pull users to server')
+        toast.error(data.error || 'Failed to pull users')
       }
     } catch (error) {
       console.error('Error pulling users:', error)
-      toast.error('Failed to pull users to server')
-    } finally {
-      setIsPulling(false)
+      toast.error('Failed to pull users')
     }
   }
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    })
+  const handleRemoveUser = async (userId: string) => {
+    if (session?.role !== 'owner') {
+      toast.error('Only owners can remove verified users')
+      return
+    }
+
+    try {
+      // This would call an API to remove the user
+      // For now, we'll just remove from local state
+      setVerifiedUsers(prev => prev.filter(user => user.userId !== userId))
+      toast.success('User removed successfully')
+    } catch (error) {
+      toast.error('Failed to remove user')
+    }
   }
 
   if (!session) {
     return <div>Loading...</div>
   }
 
-  const filteredUsers = getFilteredUsers()
-
   return (
     <div className="min-h-screen bg-[#23272A] p-4">
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Header */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-4">
-            <div className="p-2 bg-[#5865F2] rounded-lg">
-              <Shield className="h-6 w-6 text-white" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-white">Admin Dashboard</h1>
-              <p className="text-[#B9BBBE]">
-                Logged in as <Badge variant="secondary" className="ml-1">
-                  {session.role.toUpperCase()}
-                </Badge>
-              </p>
-            </div>
+        <div className="flex justify-between items-center">
+          <div>
+            <h1 className="text-3xl font-bold text-white">Admin Dashboard</h1>
+            <p className="text-[#B9BBBE]">
+              Logged in as <Badge variant="outline" className="ml-2 text-[#5865F2] border-[#5865F2]">
+                {session.role.toUpperCase()}
+              </Badge>
+            </p>
           </div>
-          <Button
-            onClick={handleLogout}
-            variant="outline"
-            className="border-[#40444B] text-[#B9BBBE] hover:bg-[#40444B]"
-          >
-            <LogOut className="h-4 w-4 mr-2" />
-            Logout
-          </Button>
+          <div className="flex space-x-2">
+            <Button
+              onClick={loadData}
+              variant="outline"
+              className="border-[#40444B] text-[#B9BBBE] hover:bg-[#40444B]"
+            >
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Refresh
+            </Button>
+            <Button
+              onClick={handleLogout}
+              variant="outline"
+              className="border-red-500/20 text-red-400 hover:bg-red-500/10"
+            >
+              <LogOut className="h-4 w-4 mr-2" />
+              Logout
+            </Button>
+          </div>
         </div>
 
         {/* Stats Cards */}
@@ -278,24 +251,27 @@ export default function SecureAdminDashboard() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-white">{stats.total}</div>
+              <p className="text-xs text-[#72767D]">All time</p>
             </CardContent>
           </Card>
-          
+
           <Card className="bg-[#2C2F33] border-[#40444B]">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-[#B9BBBE]">Today</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-white">{stats.today}</div>
+              <div className="text-2xl font-bold text-[#57F287]">{stats.today}</div>
+              <p className="text-xs text-[#72767D]">New verifications</p>
             </CardContent>
           </Card>
-          
+
           <Card className="bg-[#2C2F33] border-[#40444B]">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-[#B9BBBE]">This Week</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-white">{stats.week}</div>
+              <div className="text-2xl font-bold text-[#5865F2]">{stats.week}</div>
+              <p className="text-xs text-[#72767D]">Weekly total</p>
             </CardContent>
           </Card>
         </div>
@@ -305,46 +281,34 @@ export default function SecureAdminDashboard() {
           <CardHeader>
             <CardTitle className="text-white flex items-center">
               <UserPlus className="h-5 w-5 mr-2" />
-              Pull Users to Server
+              Pull Verified Users to Server
             </CardTitle>
             <CardDescription className="text-[#B9BBBE]">
-              Select verified users and enter a Guild ID to pull them to that server
+              Select verified users and specify a Guild ID to pull them to that server
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex space-x-4">
-              <div className="flex-1">
-                <Input
-                  placeholder="Enter Discord Guild ID (e.g., 1234567890123456789)"
-                  value={guildId}
-                  onChange={(e) => setGuildId(e.target.value)}
-                  className="bg-[#40444B] border-[#40444B] text-white placeholder-[#72767D]"
-                />
-              </div>
+            <div className="flex space-x-2">
+              <Input
+                placeholder="Enter Guild ID (e.g., 123456789012345678)"
+                value={targetGuildId}
+                onChange={(e) => setTargetGuildId(e.target.value)}
+                className="bg-[#40444B] border-[#40444B] text-white placeholder-[#72767D]"
+              />
               <Button
                 onClick={handlePullUsers}
-                disabled={!guildId.trim() || selectedUsers.length === 0 || isPulling}
-                className="bg-[#57F287] hover:bg-[#3BA55C] text-black"
+                disabled={selectedUsers.length === 0 || !targetGuildId.trim()}
+                className="bg-[#5865F2] hover:bg-[#4752C4] text-white"
               >
-                {isPulling ? (
-                  <div className="flex items-center space-x-2">
-                    <div className="w-4 h-4 border-2 border-black border-t-transparent rounded-full animate-spin" />
-                    <span>Pulling...</span>
-                  </div>
-                ) : (
-                  <>
-                    <Download className="h-4 w-4 mr-2" />
-                    Pull {selectedUsers.length} Users
-                  </>
-                )}
+                Pull {selectedUsers.length} Users
               </Button>
             </div>
             
             {selectedUsers.length > 0 && (
-              <Alert className="bg-blue-500/10 border-blue-500/20">
-                <AlertTriangle className="h-4 w-4 text-blue-400" />
-                <AlertDescription className="text-blue-400">
-                  {selectedUsers.length} user(s) selected for pulling to guild {guildId || '[Guild ID]'}
+              <Alert className="bg-[#5865F2]/10 border-[#5865F2]/20">
+                <UserPlus className="h-4 w-4 text-[#5865F2]" />
+                <AlertDescription className="text-[#5865F2]">
+                  {selectedUsers.length} user(s) selected for pulling
                 </AlertDescription>
               </Alert>
             )}
@@ -354,95 +318,84 @@ export default function SecureAdminDashboard() {
         {/* Verified Users */}
         <Card className="bg-[#2C2F33] border-[#40444B]">
           <CardHeader>
-            <div className="flex items-center justify-between">
+            <div className="flex justify-between items-center">
               <CardTitle className="text-white flex items-center">
                 <Users className="h-5 w-5 mr-2" />
-                Verified Users ({filteredUsers.length})
+                Verified Users ({verifiedUsers.length})
               </CardTitle>
-              <div className="flex items-center space-x-2">
-                <div className="relative">
-                  <Search className="h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-[#72767D]" />
-                  <Input
-                    placeholder="Search users..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-10 bg-[#40444B] border-[#40444B] text-white placeholder-[#72767D] w-64"
-                  />
-                </div>
-                <Button
-                  onClick={handleSelectAll}
-                  variant="outline"
-                  size="sm"
-                  className="border-[#40444B] text-[#B9BBBE] hover:bg-[#40444B]"
-                >
-                  {filteredUsers.every(user => selectedUsers.includes(user.userId)) ? 'Deselect All' : 'Select All'}
-                </Button>
-              </div>
+              <Button
+                onClick={handleSelectAll}
+                variant="outline"
+                size="sm"
+                className="border-[#40444B] text-[#B9BBBE] hover:bg-[#40444B]"
+              >
+                {selectedUsers.length === verifiedUsers.length ? 'Deselect All' : 'Select All'}
+              </Button>
             </div>
           </CardHeader>
           <CardContent>
             {isLoading ? (
               <div className="text-center py-8">
-                <div className="w-8 h-8 border-2 border-[#5865F2] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+                <div className="w-8 h-8 border-2 border-[#5865F2] border-t-transparent rounded-full animate-spin mx-auto mb-2" />
                 <p className="text-[#B9BBBE]">Loading verified users...</p>
               </div>
-            ) : filteredUsers.length === 0 ? (
+            ) : verifiedUsers.length === 0 ? (
               <div className="text-center py-8">
-                <Users className="h-12 w-12 text-[#72767D] mx-auto mb-4" />
-                <p className="text-[#B9BBBE]">
-                  {searchTerm ? 'No users found matching your search' : 'No verified users found'}
-                </p>
+                <Users className="h-12 w-12 text-[#72767D] mx-auto mb-2" />
+                <p className="text-[#B9BBBE]">No verified users found</p>
+                <p className="text-[#72767D] text-sm">Users will appear here after they complete verification</p>
               </div>
             ) : (
-              <div className="space-y-2">
-                {filteredUsers.map((user) => (
+              <div className="space-y-2 max-h-96 overflow-y-auto">
+                {verifiedUsers.map((user) => (
                   <div
-                    key={user.id}
-                    className={`flex items-center justify-between p-4 rounded-lg border transition-colors ${
+                    key={user.userId}
+                    className={`flex items-center justify-between p-3 rounded-lg border transition-colors cursor-pointer ${
                       selectedUsers.includes(user.userId)
                         ? 'bg-[#5865F2]/10 border-[#5865F2]/30'
-                        : 'bg-[#40444B] border-[#40444B] hover:bg-[#484C52]'
+                        : 'bg-[#40444B] border-[#40444B] hover:bg-[#40444B]/80'
                     }`}
+                    onClick={() => handleUserSelect(user.userId)}
                   >
-                    <div className="flex items-center space-x-4">
-                      <input
-                        type="checkbox"
-                        checked={selectedUsers.includes(user.userId)}
-                        onChange={() => handleSelectUser(user.userId)}
-                        className="w-4 h-4 text-[#5865F2] bg-[#40444B] border-[#72767D] rounded focus:ring-[#5865F2]"
-                      />
-                      
-                      <div className="flex items-center space-x-3">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-10 h-10 bg-[#5865F2] rounded-full flex items-center justify-center">
                         {user.avatar ? (
                           <img
-                            src={`https://cdn.discordapp.com/avatars/${user.userId}/${user.avatar}.png?size=32`}
+                            src={`https://cdn.discordapp.com/avatars/${user.userId}/${user.avatar}.png`}
                             alt={user.username}
-                            className="w-8 h-8 rounded-full"
+                            className="w-10 h-10 rounded-full"
                           />
                         ) : (
-                          <div className="w-8 h-8 bg-[#5865F2] rounded-full flex items-center justify-center">
-                            <span className="text-white text-sm font-medium">
-                              {user.username.charAt(0).toUpperCase()}
-                            </span>
-                          </div>
+                          <span className="text-white font-medium">
+                            {user.username.charAt(0).toUpperCase()}
+                          </span>
                         )}
-                        
-                        <div>
-                          <p className="text-white font-medium">{user.username}</p>
-                          <p className="text-[#B9BBBE] text-sm">ID: {user.userId}</p>
-                        </div>
+                      </div>
+                      <div>
+                        <p className="text-white font-medium">
+                          {user.username}
+                          {user.discriminator && user.discriminator !== '0' && (
+                            <span className="text-[#72767D]">#{user.discriminator}</span>
+                          )}
+                        </p>
+                        <p className="text-[#72767D] text-sm">ID: {user.userId}</p>
+                        <p className="text-[#72767D] text-xs">
+                          Verified: {new Date(user.verifiedAt).toLocaleDateString()}
+                        </p>
                       </div>
                     </div>
                     
-                    <div className="flex items-center space-x-4">
-                      <div className="text-right">
-                        <p className="text-[#B9BBBE] text-sm">Verified</p>
-                        <p className="text-white text-sm">{formatDate(user.verifiedAt)}</p>
-                      </div>
+                    <div className="flex items-center space-x-2">
+                      {selectedUsers.includes(user.userId) && (
+                        <CheckCircle className="h-5 w-5 text-[#5865F2]" />
+                      )}
                       
                       {session.role === 'owner' && (
                         <Button
-                          onClick={() => handleRemoveUser(user.userId)}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleRemoveUser(user.userId)
+                          }}
                           variant="outline"
                           size="sm"
                           className="border-red-500/20 text-red-400 hover:bg-red-500/10"
@@ -455,6 +408,51 @@ export default function SecureAdminDashboard() {
                 ))}
               </div>
             )}
+          </CardContent>
+        </Card>
+
+        {/* Bot Servers */}
+        <Card className="bg-[#2C2F33] border-[#40444B]">
+          <CardHeader>
+            <CardTitle className="text-white flex items-center">
+              <Server className="h-5 w-5 mr-2" />
+              Bot Servers
+            </CardTitle>
+            <CardDescription className="text-[#B9BBBE]">
+              Servers where the Discord bot is currently active
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {botServers.map((server) => (
+                <div
+                  key={server.id}
+                  className="flex items-center justify-between p-3 bg-[#40444B] rounded-lg"
+                >
+                  <div className="flex items-center space-x-3">
+                    <div className={`w-3 h-3 rounded-full ${
+                      server.isConnected ? 'bg-[#57F287]' : 'bg-[#ED4245]'
+                    }`} />
+                    <div>
+                      <p className="text-white font-medium">{server.name}</p>
+                      <p className="text-[#72767D] text-sm">
+                        {server.memberCount.toLocaleString()} members • ID: {server.id}
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <Badge
+                    variant="outline"
+                    className={server.isConnected 
+                      ? 'text-[#57F287] border-[#57F287]' 
+                      : 'text-[#ED4245] border-[#ED4245]'
+                    }
+                  >
+                    {server.isConnected ? 'Connected' : 'Disconnected'}
+                  </Badge>
+                </div>
+              ))}
+            </div>
           </CardContent>
         </Card>
       </div>

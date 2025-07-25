@@ -13,7 +13,7 @@ DISCORD_BOT_TOKEN = os.getenv('DISCORD_BOT_TOKEN')
 DISCORD_CLIENT_ID = os.getenv('DISCORD_CLIENT_ID', '1397971356490006558')
 DISCORD_VERIFIED_ROLE_ID = os.getenv('DISCORD_VERIFIED_ROLE_ID', '1397091951504916531')
 VERIFICATION_URL = 'https://discord-verification-bot-webpage-7tk0rize.sites.blink.new'
-API_BASE_URL = 'https://discord-verification-bot-webpage-7tk0rize-admin-api.blink-functions.com'
+API_BASE_URL = 'https://7tk0rize--admin-api.functions.blink.new'
 
 # Bot setup
 intents = discord.Intents.default()
