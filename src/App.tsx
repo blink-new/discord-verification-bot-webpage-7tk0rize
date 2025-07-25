@@ -16,8 +16,8 @@ function App() {
           <Route path="/verify" element={<VerificationPage />} />
           <Route path="/callback" element={<CallbackPage />} />
           <Route path="/dashboard" element={<AdminDashboard />} />
-          <Route path="/admin" element={<AdminLogin />} />
-          <Route path="/admin/dashboard" element={<SecureAdminDashboard />} />
+          <Route path="/admin" element={<SecureAdminDashboard />} />
+          <Route path="/admin/login" element={<AdminLogin />} />
           <Route path="/setup" element={<BotSetupGuide />} />
         </Routes>
       </Router>
